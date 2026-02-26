@@ -1,0 +1,118 @@
+/* ============================================
+   OrbitFile 设计系统 - CSS 变量定义
+   企业级模块化设计
+   ============================================ */
+
+:root {
+  /* ========== 主题色 ========== */
+  --color-primary: #2563EB;
+  --color-primary-hover: #1D4ED8;
+  --color-primary-active: #1E40AF;
+  --color-primary-light: #EFF6FF;
+  --color-primary-lighter: #DBEAFE;
+  
+  /* 成功色 */
+  --color-success: #16A34A;
+  --color-success-hover: #15803D;
+  --color-success-light: #F0FDF4;
+  --color-success-lighter: #DCFCE7;
+  
+  /* 警告色 */
+  --color-warning: #EA580C;
+  --color-warning-hover: #C2410C;
+  --color-warning-light: #FFF7ED;
+  
+  /* 危险色 */
+  --color-danger: #DC2626;
+  --color-danger-hover: #B91C1C;
+  --color-danger-light: #FEF2F2;
+  
+  /* ========== 中性色 ========== */
+  --color-gray-50: #F9FAFB;
+  --color-gray-100: #F3F4F6;
+  --color-gray-200: #E5E7EB;
+  --color-gray-300: #D1D5DB;
+  --color-gray-400: #9CA3AF;
+  --color-gray-500: #6B7280;
+  --color-gray-600: #4B5563;
+  --color-gray-700: #374151;
+  --color-gray-800: #1F2937;
+  --color-gray-900: #111827;
+  
+  /* ========== 背景色 ========== */
+  --bg-app: #F3F4F6;
+  --bg-card: #FFFFFF;
+  --bg-elevated: #FFFFFF;
+  --bg-hover: #F9FAFB;
+  --bg-active: #F3F4F6;
+  
+  /* ========== 文字色 ========== */
+  --text-primary: #111827;
+  --text-secondary: #4B5563;
+  --text-tertiary: #6B7280;
+  --text-muted: #9CA3AF;
+  --text-inverse: #FFFFFF;
+  
+  /* ========== 边框 ========== */
+  --border-color: #E5E7EB;
+  --border-color-hover: #D1D5DB;
+  --border-color-focus: var(--color-primary);
+  
+  /* ========== 间距系统 (8px 基准) ========== */
+  --spacing-0: 0;
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-10: 40px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+  
+  /* ========== 圆角 ========== */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+  
+  /* ========== 阴影 ========== */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  
+  /* ========== 字体 ========== */
+  --font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  --font-size-xs: 12px;
+  --font-size-sm: 13px;
+  --font-size-base: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 18px;
+  --font-size-2xl: 20px;
+  --font-size-3xl: 24px;
+  
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+  
+  --line-height-tight: 1.25;
+  --line-height-normal: 1.5;
+  --line-height-relaxed: 1.75;
+  
+  /* ========== 过渡动画 ========== */
+  --transition-fast: 150ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+  
+  /* ========== 布局 ========== */
+  --header-height: 48px;
+  --sidebar-width: 240px;
+  --content-max-width: 1200px;
+  --card-padding: var(--spacing-5);
+  --page-padding: var(--spacing-6);
+}

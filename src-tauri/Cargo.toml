@@ -1,0 +1,33 @@
+[package]
+name = "orbit-file"
+version = "0.1.0"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "orbit_file_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Windows 注册表读取，用于扫描已安装应用
+winreg = "0.52"
+# 系统信息获取，用于读取磁盘使用情况和进程锁检测
+sysinfo = "0.31"
+# 递归文件复制，用于迁移应用
+fs_extra = "1.3"
+# Tauri 对话框插件，用于目录选择
+tauri-plugin-dialog = "2"
+
