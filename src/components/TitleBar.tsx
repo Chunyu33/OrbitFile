@@ -18,6 +18,9 @@ export default function TitleBar() {
   return (
     <div 
       data-tauri-drag-region
+      style={{
+        paddingLeft: '12px',
+      }}
       className="h-9 bg-white flex items-center justify-between pl-4 pr-0 border-b border-[#E5E5E5] select-none"
     >
       {/* 左侧 Logo */}
@@ -40,7 +43,7 @@ export default function TitleBar() {
           onClick={handleClose}
           className="w-11 h-9 flex items-center justify-center hover:bg-[#E81123] hover:text-white transition-colors group"
         >
-          <X className="w-4 h-4 text-[#666666] group-hover:text-white" />
+          <X className="w-4 h-4 text-[#666666] group-hover:text-red" />
         </button>
       </div>
     </div>

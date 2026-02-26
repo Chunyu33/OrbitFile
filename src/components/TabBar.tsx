@@ -19,7 +19,7 @@ const tabs: { id: TabType; label: string; icon: React.ReactNode }[] = [
 export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
   return (
     <nav 
-      className="flex items-center gap-2 px-6 h-12 border-b"
+      className="flex items-center gap-3 px-6 h-12 border-b"
       style={{ 
         background: 'var(--bg-card)',
         borderColor: 'var(--border-color)'
@@ -35,6 +35,7 @@ export default function TabBar({ activeTab, onTabChange }: TabBarProps) {
             style={{
               color: isActive ? 'var(--color-primary)' : 'var(--text-secondary)',
               background: isActive ? 'var(--color-primary-light)' : 'transparent',
+              padding: '0 12px',
             }}
             onMouseEnter={(e) => {
               if (!isActive) {
