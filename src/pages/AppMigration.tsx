@@ -12,7 +12,7 @@ import Toast, { useToast } from '../components/Toast';
 import { DiskUsage, InstalledApp, MigrationResult, MigrationStep, ProcessLockResult } from '../types';
 
 export default function AppMigration() {
-  const [diskUsage, setDiskUsage] = useState<DiskUsage | null>(null);
+  const [disks, setDisks] = useState<DiskUsage[]>([]);
   const [diskLoading, setDiskLoading] = useState(true);
   const [apps, setApps] = useState<InstalledApp[]>([]);
   const [appsLoading, setAppsLoading] = useState(true);
@@ -34,11 +34,11 @@ export default function AppMigration() {
   async function fetchDiskUsage() {
     try {
       setDiskLoading(true);
-      const usage = await invoke<DiskUsage>('get_disk_usage');
-      setDiskUsage(usage);
+      const diskList = await invoke<DiskUsage[]>('get_disk_usage');
+      setDisks(diskList);
     } catch (error) {
       console.error('获取磁盘信息失败:', error);
-      setDiskUsage(null);
+      setDisks([]);
     } finally {
       setDiskLoading(false);
     }
@@ -155,19 +155,16 @@ export default function AppMigration() {
   return (
     <div className="h-full overflow-hidden flex flex-col" style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
       <div className="h-full max-w-5xl mx-auto flex flex-col w-full" style={{ gap: 'var(--spacing-3)' }}>
-        {/* 顶部：标题 + 磁盘信息 + 刷新按钮（紧凑单行） */}
-        <header className="flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center" style={{ gap: 'var(--spacing-6)' }}>
-            <h1 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--text-primary)' }}>
-              应用迁移
-            </h1>
-            {/* 内联磁盘信息 */}
-            <DiskUsageBar diskUsage={diskUsage} loading={diskLoading} compact />
+        {/* 顶部：磁盘信息 + 刷新按钮 */}
+        <header className="flex items-center justify-between flex-shrink-0" style={{ gap: 'var(--spacing-4)' }}>
+          {/* 磁盘卡片横向滚动区域 */}
+          <div className="flex-1 min-w-0">
+            <DiskUsageBar disks={disks} loading={diskLoading} />
           </div>
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="btn btn-secondary"
+            className="btn btn-secondary flex-shrink-0"
           >
             <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
             刷新

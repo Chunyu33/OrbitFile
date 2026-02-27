@@ -1,16 +1,16 @@
 // 磁盘使用情况组件
-// 企业级模块化设计
+// 显示所有磁盘，支持横向滚动
 
+import { useMemo } from 'react';
 import { HardDrive } from 'lucide-react';
 import { DiskUsage } from '../types';
 
 interface DiskUsageBarProps {
-  diskUsage: DiskUsage | null;
+  disks: DiskUsage[];
   loading: boolean;
-  compact?: boolean;
 }
 
-// 格式化字节数
+// 格式化字节数为简短格式
 function formatBytes(bytes: number): string {
   if (bytes === 0) return '0 B';
   const k = 1024;
@@ -19,152 +19,177 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-// 根据使用率返回样式
-function getProgressStyle(percent: number): { fillClass: string; iconBg: string; iconColor: string; textColor: string } {
-  if (percent >= 90) {
-    return {
-      fillClass: 'progress-fill-danger',
-      iconBg: 'var(--color-danger-light)',
-      iconColor: 'var(--color-danger)',
-      textColor: 'var(--color-danger)'
-    };
-  }
-  if (percent >= 70) {
-    return {
-      fillClass: 'progress-fill-warning',
-      iconBg: 'var(--color-warning-light)',
-      iconColor: 'var(--color-warning)',
-      textColor: 'var(--color-warning)'
-    };
-  }
-  return {
-    fillClass: 'progress-fill-safe',
-    iconBg: 'var(--color-success-light)',
-    iconColor: 'var(--color-success)',
-    textColor: 'var(--color-success)'
-  };
+// 根据使用率返回颜色
+function getUsageColor(percent: number): string {
+  if (percent >= 90) return 'var(--color-danger)';
+  if (percent >= 70) return 'var(--color-warning)';
+  return 'var(--color-primary)';
 }
 
-export default function DiskUsageBar({ diskUsage, loading, compact = false }: DiskUsageBarProps) {
-  // 紧凑模式 - 内联显示
-  if (compact) {
-    if (loading) {
-      return (
-        <div className="flex items-center animate-pulse" style={{ gap: 'var(--spacing-2)' }}>
-          <div className="w-24 h-2 rounded-full" style={{ background: 'var(--color-gray-200)' }}></div>
-        </div>
-      );
-    }
-
-    if (!diskUsage) {
-      return (
-        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>--</span>
-      );
-    }
-
-    const usagePercent = diskUsage.usage_percent;
-    const { fillClass, textColor } = getProgressStyle(usagePercent);
-
-    return (
-      <div className="flex items-center" style={{ gap: 'var(--spacing-3)' }}>
-        {/* 紧凑进度条 */}
-        <div className="progress-bar" style={{ width: '120px', height: '6px' }}>
-          <div
-            className={`progress-fill ${fillClass}`}
-            style={{ width: `${Math.min(usagePercent, 100)}%` }}
+// 单个磁盘卡片组件
+const DiskCard = ({ disk }: { disk: DiskUsage }) => {
+  const usageColor = useMemo(() => getUsageColor(disk.usage_percent), [disk.usage_percent]);
+  const displayName = disk.mount_point.replace(':\\', '');
+  
+  return (
+    <div
+      style={{
+        minWidth: '140px',
+        padding: '12px 16px',
+        background: 'var(--bg-card)',
+        borderRadius: 'var(--radius-lg)',
+        border: '1px solid var(--border-color)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+      }}
+    >
+      {/* 磁盘标识 */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div
+          style={{
+            width: '28px',
+            height: '28px',
+            borderRadius: 'var(--radius-md)',
+            background: disk.is_system ? 'var(--color-primary-light)' : 'var(--color-gray-100)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <HardDrive 
+            style={{ 
+              width: '14px', 
+              height: '14px', 
+              color: disk.is_system ? 'var(--color-primary)' : 'var(--text-tertiary)' 
+            }} 
           />
         </div>
-        {/* 百分比 */}
-        <span style={{ fontSize: 'var(--font-size-xs)', fontWeight: 'var(--font-weight-semibold)', color: textColor }}>
-          {usagePercent.toFixed(0)}%
+        <div>
+          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
+            {displayName}:
+          </div>
+          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+            {disk.name}
+          </div>
+        </div>
+      </div>
+      
+      {/* 进度条 */}
+      <div
+        style={{
+          height: '6px',
+          background: 'var(--color-gray-100)',
+          borderRadius: '3px',
+          overflow: 'hidden',
+        }}
+      >
+        <div
+          style={{
+            height: '100%',
+            width: `${Math.min(disk.usage_percent, 100)}%`,
+            background: usageColor,
+            borderRadius: '3px',
+            transition: 'width 0.3s ease',
+          }}
+        />
+      </div>
+      
+      {/* 容量信息 */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
+          可用 {formatBytes(disk.free_space)}
         </span>
-        {/* 可用空间 */}
-        <span style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-muted)' }}>
-          可用 {formatBytes(diskUsage.free_space)}
+        <span style={{ fontSize: '12px', fontWeight: 600, color: usageColor }}>
+          {disk.usage_percent.toFixed(0)}%
         </span>
       </div>
-    );
-  }
+    </div>
+  );
+};
 
-  // 标准模式
+// 加载骨架屏
+const DiskSkeleton = () => (
+  <div
+    style={{
+      minWidth: '140px',
+      padding: '12px 16px',
+      background: 'var(--bg-card)',
+      borderRadius: 'var(--radius-lg)',
+      border: '1px solid var(--border-color)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: '8px',
+    }}
+    className="animate-pulse"
+  >
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ width: '28px', height: '28px', borderRadius: 'var(--radius-md)', background: 'var(--color-gray-100)' }} />
+      <div>
+        <div style={{ width: '32px', height: '14px', borderRadius: '4px', background: 'var(--color-gray-100)' }} />
+        <div style={{ width: '48px', height: '10px', borderRadius: '4px', background: 'var(--color-gray-100)', marginTop: '4px' }} />
+      </div>
+    </div>
+    <div style={{ height: '6px', borderRadius: '3px', background: 'var(--color-gray-100)' }} />
+    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+      <div style={{ width: '60px', height: '12px', borderRadius: '4px', background: 'var(--color-gray-100)' }} />
+      <div style={{ width: '28px', height: '12px', borderRadius: '4px', background: 'var(--color-gray-100)' }} />
+    </div>
+  </div>
+);
+
+export default function DiskUsageBar({ disks, loading }: DiskUsageBarProps) {
   if (loading) {
     return (
-      <div className="card" style={{ padding: 'var(--spacing-5)' }}>
-        <div className="flex items-center gap-4 animate-pulse">
-          <div className="w-12 h-12 rounded-lg" style={{ background: 'var(--color-gray-100)' }}></div>
-          <div className="flex-1">
-            <div className="h-4 rounded w-32 mb-3" style={{ background: 'var(--color-gray-100)' }}></div>
-            <div className="h-2 rounded-full w-full" style={{ background: 'var(--color-gray-100)' }}></div>
-          </div>
-        </div>
+      <div
+        style={{
+          display: 'flex',
+          gap: '12px',
+          overflowX: 'auto',
+          paddingBottom: '4px',
+          scrollbarWidth: 'thin',
+        }}
+      >
+        {[1, 2, 3].map((i) => (
+          <DiskSkeleton key={i} />
+        ))}
       </div>
     );
   }
 
-  if (!diskUsage) {
+  if (!disks || disks.length === 0) {
     return (
-      <div className="card" style={{ padding: 'var(--spacing-5)' }}>
-        <div className="flex items-center gap-3" style={{ color: 'var(--text-tertiary)' }}>
-          <HardDrive className="w-5 h-5" />
-          <span style={{ fontSize: 'var(--font-size-sm)' }}>无法获取磁盘信息</span>
-        </div>
+      <div
+        style={{
+          padding: '16px',
+          background: 'var(--bg-card)',
+          borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-color)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          color: 'var(--text-tertiary)',
+        }}
+      >
+        <HardDrive style={{ width: '16px', height: '16px' }} />
+        <span style={{ fontSize: '13px' }}>无法获取磁盘信息</span>
       </div>
     );
   }
-
-  const usagePercent = diskUsage.usage_percent;
-  const { fillClass, iconBg, iconColor, textColor } = getProgressStyle(usagePercent);
 
   return (
-    <div className="card" style={{ padding: 'var(--spacing-5)' }}>
-      <div className="flex items-center" style={{ gap: 'var(--spacing-4)' }}>
-        {/* 图标 */}
-        <div 
-          className="w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0"
-          style={{ background: iconBg }}
-        >
-          <HardDrive className="w-6 h-6" style={{ color: iconColor }} />
-        </div>
-
-        {/* 信息区 */}
-        <div className="flex-1 min-w-0">
-          {/* 标题行 */}
-          <div className="flex items-center justify-between" style={{ marginBottom: 'var(--spacing-2)' }}>
-            <div className="flex items-center" style={{ gap: 'var(--spacing-2)' }}>
-              <span style={{ color: 'var(--text-primary)', fontWeight: 'var(--font-weight-semibold)', fontSize: 'var(--font-size-sm)' }}>
-                系统盘 (C:)
-              </span>
-            </div>
-            <div className="flex items-center" style={{ gap: 'var(--spacing-2)' }}>
-              <span style={{ fontWeight: 'var(--font-weight-bold)', fontSize: 'var(--font-size-xl)', color: textColor }}>
-                {usagePercent.toFixed(0)}%
-              </span>
-              <span style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)' }}>已使用</span>
-            </div>
-          </div>
-          
-          {/* 进度条 */}
-          <div className="progress-bar" style={{ marginBottom: 'var(--spacing-3)' }}>
-            <div
-              className={`progress-fill ${fillClass}`}
-              style={{ width: `${Math.min(usagePercent, 100)}%` }}
-            />
-          </div>
-
-          {/* 容量信息 */}
-          <div className="flex items-center" style={{ gap: 'var(--spacing-6)', fontSize: 'var(--font-size-xs)' }}>
-            <span style={{ color: 'var(--text-tertiary)' }}>
-              已用 <span style={{ fontWeight: 'var(--font-weight-medium)', color: 'var(--text-primary)' }}>{formatBytes(diskUsage.used_space)}</span>
-            </span>
-            <span style={{ color: 'var(--text-tertiary)' }}>
-              可用 <span style={{ fontWeight: 'var(--font-weight-medium)', color: 'var(--color-success)' }}>{formatBytes(diskUsage.free_space)}</span>
-            </span>
-            <span style={{ color: 'var(--text-muted)' }}>
-              共 {formatBytes(diskUsage.total_space)}
-            </span>
-          </div>
-        </div>
-      </div>
+    <div
+      style={{
+        display: 'flex',
+        gap: '12px',
+        overflowX: 'auto',
+        paddingBottom: '4px',
+        scrollbarWidth: 'thin',
+      }}
+    >
+      {disks.map((disk) => (
+        <DiskCard key={disk.mount_point} disk={disk} />
+      ))}
     </div>
   );
 }

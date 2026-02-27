@@ -306,9 +306,13 @@ fn extract_icon_to_base64(_icon_path: &str) -> String {
 }
 
 /// 磁盘使用信息结构体
-/// 包含 C 盘的总容量和可用空间
-#[derive(Debug, Serialize, Deserialize)]
+/// 包含磁盘的总容量和可用空间
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DiskUsage {
+    /// 磁盘盘符（如 "C:", "D:"）
+    pub mount_point: String,
+    /// 磁盘名称（如 "系统", "数据"）
+    pub name: String,
     /// 总容量（字节）
     pub total_space: u64,
     /// 可用空间（字节）
@@ -317,6 +321,8 @@ pub struct DiskUsage {
     pub used_space: u64,
     /// 使用百分比
     pub usage_percent: f64,
+    /// 是否为系统盘
+    pub is_system: bool,
 }
 
 /// 获取已安装应用列表
@@ -398,40 +404,24 @@ fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
     }
 }
 
-/// 获取 C 盘磁盘使用情况
-/// 使用 sysinfo 库读取系统磁盘信息
+/// 获取所有磁盘使用情况
+/// 使用 sysinfo 库读取系统所有磁盘信息
 #[tauri::command]
-fn get_disk_usage() -> Result<DiskUsage, String> {
+fn get_disk_usage() -> Result<Vec<DiskUsage>, String> {
     // 创建磁盘信息实例
     let disks = Disks::new_with_refreshed_list();
+    let mut result: Vec<DiskUsage> = Vec::new();
     
-    // 查找 C 盘（Windows 系统盘）
+    // 遍历所有磁盘
     for disk in disks.list() {
         let mount_point = disk.mount_point().to_string_lossy().to_string();
-        
-        // 检查是否为 C 盘
-        if mount_point.starts_with("C:") || mount_point == "/" {
-            let total_space = disk.total_space();
-            let free_space = disk.available_space();
-            let used_space = total_space.saturating_sub(free_space);
-            let usage_percent = if total_space > 0 {
-                (used_space as f64 / total_space as f64) * 100.0
-            } else {
-                0.0
-            };
-
-            return Ok(DiskUsage {
-                total_space,
-                free_space,
-                used_space,
-                usage_percent,
-            });
-        }
-    }
-
-    // 如果没有找到 C 盘，返回第一个磁盘的信息
-    if let Some(disk) = disks.list().first() {
         let total_space = disk.total_space();
+        
+        // 跳过容量为 0 的磁盘（如虚拟磁盘）
+        if total_space == 0 {
+            continue;
+        }
+        
         let free_space = disk.available_space();
         let used_space = total_space.saturating_sub(free_space);
         let usage_percent = if total_space > 0 {
@@ -439,16 +429,50 @@ fn get_disk_usage() -> Result<DiskUsage, String> {
         } else {
             0.0
         };
-
-        return Ok(DiskUsage {
+        
+        // 获取磁盘名称
+        let disk_name = disk.name().to_string_lossy().to_string();
+        let name = if disk_name.is_empty() {
+            // 如果没有名称，使用默认名称
+            if mount_point.starts_with("C:") {
+                "系统".to_string()
+            } else {
+                "本地磁盘".to_string()
+            }
+        } else {
+            disk_name
+        };
+        
+        // 判断是否为系统盘
+        let is_system = mount_point.starts_with("C:") || mount_point == "/";
+        
+        result.push(DiskUsage {
+            mount_point,
+            name,
             total_space,
             free_space,
             used_space,
             usage_percent,
+            is_system,
         });
     }
-
-    Err("无法获取磁盘信息".to_string())
+    
+    // 按盘符排序，系统盘优先
+    result.sort_by(|a, b| {
+        if a.is_system && !b.is_system {
+            std::cmp::Ordering::Less
+        } else if !a.is_system && b.is_system {
+            std::cmp::Ordering::Greater
+        } else {
+            a.mount_point.cmp(&b.mount_point)
+        }
+    });
+    
+    if result.is_empty() {
+        Err("无法获取磁盘信息".to_string())
+    } else {
+        Ok(result)
+    }
 }
 
 // ============================================================================

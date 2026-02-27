@@ -23,6 +23,10 @@ export interface InstalledApp {
  * 对应 Rust 后端的 DiskUsage 结构体
  */
 export interface DiskUsage {
+  // 磁盘盘符（如 "C:", "D:"）
+  mount_point: string;
+  // 磁盘名称（如 "系统", "数据"）
+  name: string;
   // 总容量（字节）
   total_space: number;
   // 可用空间（字节）
@@ -31,6 +35,8 @@ export interface DiskUsage {
   used_space: number;
   // 使用百分比
   usage_percent: number;
+  // 是否为系统盘
+  is_system: boolean;
 }
 
 /**

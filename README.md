@@ -49,9 +49,10 @@ Windows 用户经常面临以下困扰：
 │  ┌──────────────────────────────────────────┐               │
 │  │  Commands                                 │               │
 │  │  • get_installed_apps    扫描已安装应用   │               │
-│  │  • get_disk_usage        获取磁盘信息     │               │
+│  │  • get_disk_usage        获取所有磁盘信息 │               │
 │  │  • migrate_app           执行应用迁移     │               │
 │  │  • restore_app           恢复应用         │               │
+│  │  • open_folder           打开文件夹       │               │
 │  │  • get_migration_history 获取迁移历史     │               │
 │  ├──────────────────────────────────────────┤               │
 │  │  Core Logic                               │               │
@@ -174,6 +175,32 @@ node scripts/generate-ico.js
 ```
 
 源 SVG 文件位于 `src-tauri/icons/icon.svg`
+
+## ✨ 功能特性
+
+### 应用图标提取
+
+OrbitFile 使用 Windows Win32 API 提取应用的真实图标：
+
+- **ExtractIconExW** - 从 EXE/DLL 文件中提取图标
+- **GetIconInfo / GetDIBits** - 将图标转换为位图数据
+- **图标缓存** - 使用内存缓存避免重复提取，提升性能
+
+### 多磁盘显示
+
+首页顶部显示所有本地磁盘的使用情况：
+
+- 支持横向滚动，适配多分区用户
+- 系统盘（C:）优先显示并高亮
+- 根据使用率显示不同颜色（绿色 < 70% < 黄色 < 90% < 红色）
+
+### 设置持久化
+
+用户设置保存在 localStorage 中：
+
+- 默认迁移目标路径
+- 迁移前备份开关
+- 文件完整性校验开关
 
 ## 📝 开发说明
 
