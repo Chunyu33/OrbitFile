@@ -2,8 +2,38 @@
 // 企业级模块化设计
 
 import { useState, useEffect } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FolderCog, Shield, CheckCircle, ChevronRight, User, Mail, Info, AlertTriangle, Lightbulb, FolderArchive } from 'lucide-react';
+import { 
+  FolderCog, Shield, CheckCircle, ChevronRight, User, Mail, Info, 
+  AlertTriangle, Lightbulb, FolderArchive, Trash2, 
+  AppWindow, Loader2, Sparkles 
+} from 'lucide-react';
+
+// 迁移统计信息接口
+interface MigrationStats {
+  total_space_saved: number;
+  active_migrations: number;
+  restored_count: number;
+  app_migrations: number;
+  folder_migrations: number;
+}
+
+// 清理结果接口
+interface CleanupResult {
+  cleaned_count: number;
+  cleaned_size: number;
+  errors: string[];
+}
+
+// 格式化文件大小
+function formatSize(bytes: number): string {
+  if (bytes === 0) return '0 B';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+}
 
 // 应用配置信息
 const APP_INFO = {
@@ -88,12 +118,42 @@ function Toggle({ active, onChange }: { active: boolean; onChange: () => void })
 
 export default function Settings() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const [stats, setStats] = useState<MigrationStats | null>(null);
+  const [cleaning, setCleaning] = useState(false);
+  const [cleanResult, setCleanResult] = useState<CleanupResult | null>(null);
   const currentYear = new Date().getFullYear();
 
-  // 加载设置
+  // 加载设置和统计信息
   useEffect(() => {
     setSettings(loadSettings());
+    loadStats();
   }, []);
+
+  // 加载迁移统计信息
+  async function loadStats() {
+    try {
+      const result = await invoke<MigrationStats>('get_migration_stats');
+      setStats(result);
+    } catch (e) {
+      console.error('加载统计信息失败:', e);
+    }
+  }
+
+  // 清理幽灵链接
+  async function handleCleanGhostLinks() {
+    try {
+      setCleaning(true);
+      setCleanResult(null);
+      const result = await invoke<CleanupResult>('clean_ghost_links');
+      setCleanResult(result);
+      // 清理后刷新统计
+      await loadStats();
+    } catch (e) {
+      console.error('清理失败:', e);
+    } finally {
+      setCleaning(false);
+    }
+  }
 
   // 更新设置
   const updateSetting = <K extends keyof typeof DEFAULT_SETTINGS>(
@@ -129,6 +189,63 @@ export default function Settings() {
           <h1 className="page-title">设置</h1>
           <p className="page-subtitle">配置应用迁移选项和偏好</p>
         </header>
+
+        {/* 已节省空间统计卡片 */}
+        {stats && stats.active_migrations > 0 && (
+          <section 
+            className="card"
+            style={{ 
+              padding: 'var(--spacing-5)',
+              background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark, #1d4ed8) 100%)',
+              color: 'white',
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="flex items-center" style={{ gap: '8px', marginBottom: '8px' }}>
+                  <Sparkles className="w-5 h-5" />
+                  <span style={{ fontSize: '14px', opacity: 0.9 }}>已节省空间</span>
+                </div>
+                <div style={{ fontSize: '32px', fontWeight: 700, marginBottom: '4px' }}>
+                  {formatSize(stats.total_space_saved)}
+                </div>
+                <div style={{ fontSize: '12px', opacity: 0.8 }}>
+                  通过 {stats.active_migrations} 次迁移释放
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '16px' }}>
+                {stats.app_migrations > 0 && (
+                  <div style={{ textAlign: 'center' }}>
+                    <div className="flex items-center justify-center" style={{ 
+                      width: '40px', height: '40px', 
+                      background: 'rgba(255,255,255,0.2)', 
+                      borderRadius: '8px',
+                      marginBottom: '4px',
+                    }}>
+                      <AppWindow className="w-5 h-5" />
+                    </div>
+                    <div style={{ fontSize: '14px', fontWeight: 600 }}>{stats.app_migrations}</div>
+                    <div style={{ fontSize: '10px', opacity: 0.8 }}>应用</div>
+                  </div>
+                )}
+                {stats.folder_migrations > 0 && (
+                  <div style={{ textAlign: 'center' }}>
+                    <div className="flex items-center justify-center" style={{ 
+                      width: '40px', height: '40px', 
+                      background: 'rgba(255,255,255,0.2)', 
+                      borderRadius: '8px',
+                      marginBottom: '4px',
+                    }}>
+                      <FolderArchive className="w-5 h-5" />
+                    </div>
+                    <div style={{ fontSize: '14px', fontWeight: 600 }}>{stats.folder_migrations}</div>
+                    <div style={{ fontSize: '10px', opacity: 0.8 }}>文件夹</div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* 迁移设置 */}
         <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
@@ -215,6 +332,91 @@ export default function Settings() {
               </div>
             </div>
             <Toggle active={settings.verifyEnabled} onChange={() => updateSetting('verifyEnabled', !settings.verifyEnabled)} />
+          </div>
+        </section>
+
+        {/* 存储维护 */}
+        <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div 
+            style={{ 
+              padding: 'var(--spacing-3) var(--spacing-5)',
+              background: 'var(--color-gray-50)',
+              borderBottom: '1px solid var(--border-color)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 'var(--font-weight-medium)',
+              color: 'var(--text-tertiary)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}
+          >
+            存储维护
+          </div>
+          
+          {/* 清理无效记录 */}
+          <div style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
+            <div className="flex items-start" style={{ gap: 'var(--spacing-3)' }}>
+              <div 
+                className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--color-danger-light)' }}
+              >
+                <Trash2 className="w-4 h-4" style={{ color: 'var(--color-danger)' }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p className="setting-label">清理无效记录</p>
+                <p className="setting-desc" style={{ marginBottom: 'var(--spacing-3)' }}>
+                  扫描并清理"幽灵链接"——目标磁盘已移除或文件已删除的迁移记录。
+                  这将删除 C 盘上指向不存在位置的 Junction 链接。
+                </p>
+                
+                <button
+                  onClick={handleCleanGhostLinks}
+                  disabled={cleaning}
+                  className="btn btn-secondary"
+                  style={{ marginBottom: cleanResult ? 'var(--spacing-3)' : 0 }}
+                >
+                  {cleaning ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      扫描中...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-4 h-4" />
+                      扫描并清理
+                    </>
+                  )}
+                </button>
+
+                {/* 清理结果 */}
+                {cleanResult && (
+                  <div 
+                    style={{ 
+                      padding: 'var(--spacing-3)',
+                      background: cleanResult.cleaned_count > 0 ? 'var(--color-success-light)' : 'var(--color-gray-50)',
+                      borderRadius: 'var(--radius-md)',
+                      fontSize: 'var(--font-size-xs)',
+                    }}
+                  >
+                    {cleanResult.cleaned_count > 0 ? (
+                      <div style={{ color: 'var(--color-success)' }}>
+                        ✓ 已清理 {cleanResult.cleaned_count} 条无效记录，释放 {formatSize(cleanResult.cleaned_size)} 记录空间
+                      </div>
+                    ) : (
+                      <div style={{ color: 'var(--text-tertiary)' }}>
+                        ✓ 未发现无效记录，所有链接状态正常
+                      </div>
+                    )}
+                    {cleanResult.errors.length > 0 && (
+                      <div style={{ color: 'var(--color-danger)', marginTop: 'var(--spacing-2)' }}>
+                        {cleanResult.errors.map((err, i) => (
+                          <div key={i}>⚠ {err}</div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         </section>
 

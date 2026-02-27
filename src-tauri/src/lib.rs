@@ -1580,6 +1580,191 @@ fn get_migrated_paths() -> Result<Vec<String>, String> {
     Ok(paths)
 }
 
+/// 链接健康状态检查结果
+#[derive(Debug, Serialize, Deserialize)]
+pub struct LinkStatusResult {
+    /// 链接是否健康（原路径是 Junction 且目标路径存在）
+    pub healthy: bool,
+    /// 目标路径是否存在
+    pub target_exists: bool,
+    /// 原路径是否是 Junction
+    pub is_junction: bool,
+    /// 错误信息（如果有）
+    pub error: Option<String>,
+}
+
+/// 检查迁移记录的链接健康状态
+/// 
+/// 检查逻辑：
+/// 1. 根据记录 ID 查找迁移记录
+/// 2. 检查原路径是否仍然是 Junction
+/// 3. 检查目标路径是否存在（例如：移动硬盘是否已连接）
+/// 
+/// 这个检查是轻量级的，不会阻塞 UI
+#[tauri::command]
+fn check_link_status(record_id: String) -> Result<LinkStatusResult, String> {
+    let storage = load_history();
+    
+    // 查找记录
+    let record = storage.records
+        .iter()
+        .find(|r| r.id == record_id && r.status == "active");
+    
+    let record = match record {
+        Some(r) => r,
+        None => return Ok(LinkStatusResult {
+            healthy: false,
+            target_exists: false,
+            is_junction: false,
+            error: Some("未找到该迁移记录".to_string()),
+        }),
+    };
+    
+    let original_path = Path::new(&record.original_path);
+    let target_path = Path::new(&record.target_path);
+    
+    // 检查原路径是否是 Junction
+    let is_junc = is_junction(original_path);
+    
+    // 检查目标路径是否存在
+    let target_exists = target_path.exists();
+    
+    // 健康状态：原路径是 Junction 且目标路径存在
+    let healthy = is_junc && target_exists;
+    
+    Ok(LinkStatusResult {
+        healthy,
+        target_exists,
+        is_junction: is_junc,
+        error: None,
+    })
+}
+
+/// 清理无效的迁移记录（幽灵链接清理器）
+/// 
+/// 清理逻辑：
+/// 1. 扫描所有活跃的迁移记录
+/// 2. 检查每条记录的目标路径是否存在
+/// 3. 如果目标路径不存在（幽灵链接）：
+///    - 删除原路径的 Junction（如果存在）
+///    - 将记录状态标记为 "ghost_cleaned"
+/// 4. 返回清理的记录数量
+#[tauri::command]
+fn clean_ghost_links() -> Result<CleanupResult, String> {
+    let mut storage = load_history();
+    let mut cleaned_count = 0;
+    let mut cleaned_size: u64 = 0;
+    let mut errors: Vec<String> = Vec::new();
+    
+    // 遍历所有活跃记录
+    for record in storage.records.iter_mut() {
+        if record.status != "active" {
+            continue;
+        }
+        
+        let original_path = Path::new(&record.original_path);
+        let target_path = Path::new(&record.target_path);
+        
+        // 检查目标路径是否存在
+        if !target_path.exists() {
+            // 目标路径不存在，这是一个幽灵链接
+            
+            // 尝试删除原路径的 Junction
+            if original_path.exists() && is_junction(original_path) {
+                if let Err(e) = fs::remove_dir(original_path) {
+                    errors.push(format!("无法删除 Junction {}: {}", record.original_path, e));
+                    continue;
+                }
+            }
+            
+            // 更新记录状态
+            record.status = "ghost_cleaned".to_string();
+            cleaned_count += 1;
+            cleaned_size += record.size;
+        }
+    }
+    
+    // 保存更新后的记录
+    if cleaned_count > 0 {
+        if let Err(e) = save_history(&storage) {
+            return Err(format!("保存历史记录失败: {}", e));
+        }
+    }
+    
+    Ok(CleanupResult {
+        cleaned_count,
+        cleaned_size,
+        errors,
+    })
+}
+
+/// 清理结果结构体
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CleanupResult {
+    /// 清理的记录数量
+    pub cleaned_count: u32,
+    /// 清理的总大小（字节）
+    pub cleaned_size: u64,
+    /// 错误信息列表
+    pub errors: Vec<String>,
+}
+
+/// 获取迁移统计信息
+/// 用于设置页面显示已节省的空间等统计数据
+#[tauri::command]
+fn get_migration_stats() -> Result<MigrationStats, String> {
+    let storage = load_history();
+    
+    let mut total_migrated: u64 = 0;
+    let mut active_count: u32 = 0;
+    let mut restored_count: u32 = 0;
+    let mut app_count: u32 = 0;
+    let mut folder_count: u32 = 0;
+    
+    for record in &storage.records {
+        match record.status.as_str() {
+            "active" => {
+                active_count += 1;
+                total_migrated += record.size;
+                
+                // 统计类型
+                if record.record_type == MigrationRecordType::LargeFolder {
+                    folder_count += 1;
+                } else {
+                    app_count += 1;
+                }
+            }
+            "restored" => {
+                restored_count += 1;
+            }
+            _ => {}
+        }
+    }
+    
+    Ok(MigrationStats {
+        total_space_saved: total_migrated,
+        active_migrations: active_count,
+        restored_count,
+        app_migrations: app_count,
+        folder_migrations: folder_count,
+    })
+}
+
+/// 迁移统计信息结构体
+#[derive(Debug, Serialize, Deserialize)]
+pub struct MigrationStats {
+    /// 总共节省的空间（字节）
+    pub total_space_saved: u64,
+    /// 当前活跃的迁移数量
+    pub active_migrations: u32,
+    /// 已恢复的迁移数量
+    pub restored_count: u32,
+    /// 应用迁移数量
+    pub app_migrations: u32,
+    /// 文件夹迁移数量
+    pub folder_migrations: u32,
+}
+
 /// 恢复应用命令
 /// 将已迁移的应用恢复到原始位置
 /// 
@@ -1755,7 +1940,10 @@ pub fn run() {
             open_folder,
             get_large_folders,
             migrate_large_folder,
-            restore_large_folder
+            restore_large_folder,
+            check_link_status,
+            clean_ghost_links,
+            get_migration_stats
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

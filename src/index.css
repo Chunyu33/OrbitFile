@@ -85,11 +85,26 @@ input {
   to { transform: rotate(360deg); }
 }
 
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .animate-fade-in {
   animation: fadeIn 0.2s ease-out;
 }
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+.animate-modal-in {
+  animation: modalIn 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
