@@ -111,21 +111,31 @@ export default function MigrationModal({
       />
       <div className="absolute inset-0 bg-gradient-to-b from-white/8 via-transparent to-black/12 pointer-events-none" />
 
-      {/* 弹窗主体 - rounded-2xl (16px)，深阴影，入场动画 */}
-      <div style={{ padding: '10px' }} className="relative w-full max-w-[520px] overflow-hidden rounded-2xl bg-white shadow-2xl animate-modal-in">
+      {/* 弹窗主体 - 使用 CSS 变量支持深色模式 */}
+      <div 
+        style={{ padding: '10px', background: 'var(--bg-modal)' }} 
+        className="relative w-full max-w-[520px] overflow-hidden rounded-2xl shadow-2xl animate-modal-in"
+      >
         
         {/* 一级层：标题栏 */}
-        <div className="flex items-center justify-between border-b border-slate-100 px-8 py-5">
+        <div 
+          className="flex items-center justify-between px-8 py-5"
+          style={{ borderBottom: '1px solid var(--border-color)' }}
+        >
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#0078D4]">
+            <div 
+              className="flex h-9 w-9 items-center justify-center rounded-xl"
+              style={{ background: 'var(--color-primary)' }}
+            >
               <FolderSync className="h-4.5 w-4.5 text-white" />
             </div>
-            <h2 className="text-base font-semibold text-slate-900">应用迁移</h2>
+            <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>应用迁移</h2>
           </div>
           {canClose && (
             <button
               onClick={onClose}
-              className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-all hover:bg-slate-100 hover:text-slate-600"
+              className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
+              style={{ color: 'var(--text-muted)' }}
               aria-label="关闭弹窗"
             >
               <X className="h-4 w-4" />
@@ -133,73 +143,88 @@ export default function MigrationModal({
           )}
         </div>
 
-        {/* 二级层：核心内容区 - 增加内边距到 p-10 */}
-        <div style={{padding: '10px 0 10px 0'}} className="px-5 py-10">
+        {/* 二级层：核心内容区 */}
+        <div style={{ padding: '10px 0 10px 0' }} className="px-5 py-10">
           {/* 应用名称区：视觉焦点 */}
           <div className="mb-8 text-center">
-            <p className="mb-2 text-xs font-medium uppercase tracking-wider text-slate-400">迁移目标应用</p>
-            <p className="truncate text-[28px] font-bold leading-tight text-slate-900">{appName}</p>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+              迁移目标应用
+            </p>
+            <p className="truncate text-[28px] font-bold leading-tight" style={{ color: 'var(--text-primary)' }}>
+              {appName}
+            </p>
           </div>
 
           {/* 状态指示区：小图标 + 标签 */}
           <div className="mb-6 flex items-center justify-center gap-2">
-            {isLoading && <LoaderCircle className="h-4 w-4 animate-spin text-[#0078D4]" />}
-            {isSuccess && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
-            {isError && <AlertCircle className="h-4 w-4 text-red-500" />}
+            {isLoading && <LoaderCircle className="h-4 w-4 animate-spin" style={{ color: 'var(--color-primary)' }} />}
+            {isSuccess && <CheckCircle2 className="h-4 w-4" style={{ color: 'var(--color-success)' }} />}
+            {isError && <AlertCircle className="h-4 w-4" style={{ color: 'var(--color-danger)' }} />}
             <span
-              className={`text-sm font-medium ${
-                isSuccess ? 'text-emerald-600' : isError ? 'text-red-600' : 'text-[#0078D4]'
-              }`}
+              className="text-sm font-medium"
+              style={{ 
+                color: isSuccess 
+                  ? 'var(--color-success)' 
+                  : isError 
+                  ? 'var(--color-danger)' 
+                  : 'var(--color-primary)' 
+              }}
             >
               {config.label}
             </span>
           </div>
 
           {/* 状态描述 */}
-          <p className="mb-6 text-center text-sm text-slate-500">{config.desc}</p>
+          <p className="mb-6 text-center text-sm" style={{ color: 'var(--text-tertiary)' }}>{config.desc}</p>
 
           {/* 处理态：细进度条 (4px 高度) */}
           {isLoading && (
             <div className="mb-6">
-              <div className="h-1 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-1 overflow-hidden rounded-full" style={{ background: 'var(--color-gray-200)' }}>
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-[#0078D4] to-[#00BCF2] transition-all duration-700 ease-out"
-                  style={{ width: `${config.progress}%` }}
+                  className="h-full rounded-full transition-all duration-700 ease-out"
+                  style={{ 
+                    width: `${config.progress}%`,
+                    background: 'linear-gradient(90deg, var(--color-primary), var(--color-primary-hover))'
+                  }}
                 />
               </div>
-              <p className="mt-2 text-center text-xs text-slate-400">{config.progress}%</p>
+              <p className="mt-2 text-center text-xs" style={{ color: 'var(--text-muted)' }}>{config.progress}%</p>
             </div>
           )}
 
           {/* 成功态：柔和绿色提示 */}
           {isSuccess && (
-            <div className="mb-6 rounded-xl bg-emerald-50 px-4 py-3 text-center">
-              <p className="text-sm text-emerald-700">迁移流程已完成，应用可从新位置正常运行。</p>
+            <div 
+              className="mb-6 rounded-xl px-4 py-3 text-center"
+              style={{ background: 'var(--color-success-light)' }}
+            >
+              <p className="text-sm" style={{ color: 'var(--color-success)' }}>
+                迁移流程已完成，应用可从新位置正常运行。
+              </p>
             </div>
           )}
 
           {/* 失败态：纯文本排版，无边框，无厚重红色块 */}
           {isError && message && (
             <div className="mb-6 text-center">
-              {/* 错误类型标记 - 仅此处使用红色 */}
-              <p className="mb-2 text-sm font-medium text-red-600">错误详情</p>
-              {/* 错误详情 - 使用灰色次要文字 */}
-              <p className="text-sm leading-relaxed text-slate-500">{message}</p>
+              <p className="mb-2 text-sm font-medium" style={{ color: 'var(--color-danger)' }}>错误详情</p>
+              <p className="text-sm leading-relaxed" style={{ color: 'var(--text-tertiary)' }}>{message}</p>
             </div>
           )}
 
           {/* 进程锁警告 */}
           {lockedProcesses.length > 0 && step === 'checking' && (
-            <div className="mb-6 rounded-xl bg-amber-50 p-4">
+            <div className="mb-6 rounded-xl p-4" style={{ background: 'var(--color-warning-light)' }}>
               <div className="flex items-start gap-3">
-                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
+                <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" style={{ color: 'var(--color-warning)' }} />
                 <div>
-                  <p className="mb-1 text-sm font-medium text-amber-800">检测到进程占用</p>
-                  <p className="mb-2 text-xs text-amber-700/80">以下程序正在使用该目录，建议先关闭：</p>
-                  <ul className="space-y-1 text-xs text-amber-700">
+                  <p className="mb-1 text-sm font-medium" style={{ color: 'var(--text-primary)' }}>检测到进程占用</p>
+                  <p className="mb-2 text-xs" style={{ color: 'var(--text-secondary)' }}>以下程序正在使用该目录，建议先关闭：</p>
+                  <ul className="space-y-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
                     {lockedProcesses.map((proc, i) => (
                       <li key={i} className="flex items-center gap-2">
-                        <span className="h-1 w-1 rounded-full bg-amber-500" />
+                        <span className="h-1 w-1 rounded-full" style={{ background: 'var(--color-warning)' }} />
                         {proc}
                       </li>
                     ))}
@@ -212,10 +237,18 @@ export default function MigrationModal({
 
         {/* 三级层：底部操作区 */}
         {canClose && (
-          <div style={{padding: '10px 0 2px 0'}} className="flex items-center justify-center gap-3 border-t border-slate-100 bg-slate-50/50 px-8 py-5">
+          <div 
+            style={{ 
+              padding: '10px 0 2px 0', 
+              borderTop: '1px solid var(--border-color)',
+              background: 'var(--color-gray-50)'
+            }} 
+            className="flex items-center justify-center gap-3 px-8 py-5"
+          >
             <button
               onClick={onClose}
-              className="min-w-[120px] rounded-lg bg-[#0078D4] px-6 py-2.5 text-sm font-medium text-blue transition-all hover:bg-[#106EBE] hover:scale-[1.02] active:scale-[0.98]"
+              className="min-w-[120px] rounded-lg px-6 py-2.5 text-sm font-medium text-white transition-all hover:scale-[1.02] active:scale-[0.98]"
+              style={{ background: 'var(--color-primary)' }}
             >
               {isSuccess ? '完成' : '我知道了'}
             </button>

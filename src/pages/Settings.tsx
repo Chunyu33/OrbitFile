@@ -1,5 +1,6 @@
 // 设置页面
 // 企业级模块化设计
+// 包含外观设置（主题切换）、迁移设置、存储维护等功能
 
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
@@ -7,8 +8,10 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { 
   FolderCog, Shield, CheckCircle, ChevronRight, User, Mail, Info, 
   AlertTriangle, Lightbulb, FolderArchive, Trash2, 
-  AppWindow, Loader2, Sparkles 
+  AppWindow, Loader2, Sparkles, Sun, Moon, Monitor
 } from 'lucide-react';
+import { useThemeContext } from '../App';
+import type { ThemeMode } from '../hooks/useTheme';
 
 // 迁移统计信息接口
 interface MigrationStats {
@@ -116,12 +119,54 @@ function Toggle({ active, onChange }: { active: boolean; onChange: () => void })
   );
 }
 
+// 主题切换按钮组件
+function ThemeButton({ 
+  mode, 
+  currentMode, 
+  onClick, 
+  icon, 
+  label 
+}: { 
+  mode: ThemeMode; 
+  currentMode: ThemeMode; 
+  onClick: () => void; 
+  icon: React.ReactNode; 
+  label: string;
+}) {
+  const isActive = mode === currentMode;
+  return (
+    <button
+      onClick={onClick}
+      title={label}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: '36px',
+        height: '28px',
+        borderRadius: 'var(--radius-md)',
+        border: 'none',
+        cursor: 'pointer',
+        background: isActive ? 'var(--bg-card)' : 'transparent',
+        color: isActive ? 'var(--color-primary)' : 'var(--text-muted)',
+        boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
+        transition: 'all var(--transition-fast)',
+      }}
+    >
+      {icon}
+    </button>
+  );
+}
+
 export default function Settings() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [stats, setStats] = useState<MigrationStats | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [cleanResult, setCleanResult] = useState<CleanupResult | null>(null);
   const currentYear = new Date().getFullYear();
+  
+  // 获取主题状态
+  const themeState = useThemeContext();
 
   // 加载设置和统计信息
   useEffect(() => {
@@ -246,6 +291,77 @@ export default function Settings() {
             </div>
           </section>
         )}
+
+        {/* 外观设置 - 主题切换 */}
+        <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div 
+            style={{ 
+              padding: 'var(--spacing-3) var(--spacing-5)',
+              background: 'var(--color-gray-50)',
+              borderBottom: '1px solid var(--border-color)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 'var(--font-weight-medium)',
+              color: 'var(--text-tertiary)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}
+          >
+            外观设置
+          </div>
+          
+          {/* 主题切换 */}
+          <div className="setting-item" style={{ padding: 'var(--spacing-4) var(--spacing-5)', margin: 0 }}>
+            <div className="flex items-center" style={{ gap: 'var(--spacing-3)' }}>
+              <div 
+                className="w-9 h-9 rounded-lg flex items-center justify-center"
+                style={{ background: 'var(--color-primary-light)' }}
+              >
+                {themeState.isDark ? (
+                  <Moon className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
+                ) : (
+                  <Sun className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
+                )}
+              </div>
+              <div>
+                <p className="setting-label">主题模式</p>
+                <p className="setting-desc">选择浅色、深色或跟随系统</p>
+              </div>
+            </div>
+            
+            {/* 分段控制器 - 三个图标按钮 */}
+            <div 
+              className="flex items-center"
+              style={{ 
+                background: 'var(--color-gray-100)',
+                borderRadius: 'var(--radius-lg)',
+                padding: '3px',
+                gap: '2px',
+              }}
+            >
+              <ThemeButton 
+                mode="light" 
+                currentMode={themeState.mode} 
+                onClick={() => themeState.setTheme('light')}
+                icon={<Sun className="w-4 h-4" />}
+                label="浅色"
+              />
+              <ThemeButton 
+                mode="dark" 
+                currentMode={themeState.mode} 
+                onClick={() => themeState.setTheme('dark')}
+                icon={<Moon className="w-4 h-4" />}
+                label="深色"
+              />
+              <ThemeButton 
+                mode="system" 
+                currentMode={themeState.mode} 
+                onClick={() => themeState.setTheme('system')}
+                icon={<Monitor className="w-4 h-4" />}
+                label="系统"
+              />
+            </div>
+          </div>
+        </section>
 
         {/* 迁移设置 */}
         <section className="card" style={{ padding: 0, overflow: 'hidden' }}>

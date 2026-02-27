@@ -108,3 +108,14 @@ input {
   animation: modalIn 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
+/* 主题切换过渡效果 - 确保切换平滑不闪烁 */
+.theme-transition,
+.theme-transition *,
+.theme-transition *::before,
+.theme-transition *::after {
+  transition: background-color 300ms ease, 
+              border-color 300ms ease, 
+              color 200ms ease,
+              box-shadow 300ms ease !important;
+}
+

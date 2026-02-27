@@ -1,15 +1,22 @@
 /* ============================================
    OrbitFile 设计系统 - CSS 变量定义
    企业级模块化设计
+   
+   主题系统说明（中文）：
+   - 支持三种模式：浅色 (light)、深色 (dark)、跟随系统 (system)
+   - 深色模式采用深邃的深蓝灰色调，类似 VS Code / Windows 11 设置页面
+   - 所有颜色变量通过 CSS 变量实现，切换时自动过渡
    ============================================ */
 
-:root {
-  /* ========== 主题色 ========== */
-  --color-primary: #2563EB;
-  --color-primary-hover: #1D4ED8;
-  --color-primary-active: #1E40AF;
-  --color-primary-light: #EFF6FF;
-  --color-primary-lighter: #DBEAFE;
+/* ========== 浅色主题（默认） ========== */
+:root,
+[data-theme="light"] {
+  /* 主题色 - Windows 11 品牌蓝 */
+  --color-primary: #0078D4;
+  --color-primary-hover: #106EBE;
+  --color-primary-active: #005A9E;
+  --color-primary-light: #EBF5FF;
+  --color-primary-lighter: #D6EBFF;
   
   /* 成功色 */
   --color-success: #16A34A;
@@ -27,7 +34,7 @@
   --color-danger-hover: #B91C1C;
   --color-danger-light: #FEF2F2;
   
-  /* ========== 中性色 ========== */
+  /* 中性色 */
   --color-gray-50: #F9FAFB;
   --color-gray-100: #F3F4F6;
   --color-gray-200: #E5E7EB;
@@ -39,26 +46,107 @@
   --color-gray-800: #1F2937;
   --color-gray-900: #111827;
   
-  /* ========== 背景色 ========== */
+  /* 背景色 */
   --bg-app: #F3F4F6;
   --bg-card: #FFFFFF;
   --bg-elevated: #FFFFFF;
   --bg-hover: #F9FAFB;
   --bg-active: #F3F4F6;
+  --bg-sidebar: #FFFFFF;
+  --bg-modal: #FFFFFF;
+  --bg-modal-overlay: rgba(0, 0, 0, 0.4);
   
-  /* ========== 文字色 ========== */
+  /* 文字色 */
   --text-primary: #111827;
   --text-secondary: #4B5563;
   --text-tertiary: #6B7280;
   --text-muted: #9CA3AF;
   --text-inverse: #FFFFFF;
   
-  /* ========== 边框 ========== */
+  /* 边框 */
   --border-color: #E5E7EB;
   --border-color-hover: #D1D5DB;
   --border-color-focus: var(--color-primary);
   
-  /* ========== 间距系统 (8px 基准) ========== */
+  /* 阴影 */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+}
+
+/* ========== 深色主题 ========== */
+/* 采用深邃的深蓝灰色调，类似 VS Code / Windows 11 设置页面 */
+[data-theme="dark"] {
+  /* 主题色 - 深色模式下稍微提亮 */
+  --color-primary: #3B9EFF;
+  --color-primary-hover: #5AADFF;
+  --color-primary-active: #2B8EEF;
+  --color-primary-light: rgba(59, 158, 255, 0.15);
+  --color-primary-lighter: rgba(59, 158, 255, 0.1);
+  
+  /* 成功色 */
+  --color-success: #34D399;
+  --color-success-hover: #4ADE80;
+  --color-success-light: rgba(52, 211, 153, 0.15);
+  --color-success-lighter: rgba(52, 211, 153, 0.1);
+  
+  /* 警告色 */
+  --color-warning: #FB923C;
+  --color-warning-hover: #FDBA74;
+  --color-warning-light: rgba(251, 146, 60, 0.15);
+  
+  /* 危险色 */
+  --color-danger: #F87171;
+  --color-danger-hover: #FCA5A5;
+  --color-danger-light: rgba(248, 113, 113, 0.15);
+  
+  /* 中性色 - 深色模式反转 */
+  --color-gray-50: #1E293B;
+  --color-gray-100: #1E293B;
+  --color-gray-200: #334155;
+  --color-gray-300: #475569;
+  --color-gray-400: #64748B;
+  --color-gray-500: #94A3B8;
+  --color-gray-600: #CBD5E1;
+  --color-gray-700: #E2E8F0;
+  --color-gray-800: #F1F5F9;
+  --color-gray-900: #F8FAFC;
+  
+  /* 背景色 - 深邃的深蓝灰色，有层次感 */
+  --bg-app: #0F172A;           /* Slate 900 - 最深层背景 */
+  --bg-card: #1E293B;          /* Slate 800 - 卡片背景 */
+  --bg-elevated: #334155;      /* Slate 700 - 悬浮层背景 */
+  --bg-hover: #334155;         /* Slate 700 - 悬停状态 */
+  --bg-active: #475569;        /* Slate 600 - 激活状态 */
+  --bg-sidebar: #1E293B;       /* Slate 800 - 侧边栏 */
+  --bg-modal: #1E293B;         /* Slate 800 - 弹窗背景 */
+  --bg-modal-overlay: rgba(0, 0, 0, 0.6);
+  
+  /* 文字色 - 深色模式反转 */
+  --text-primary: #F1F5F9;     /* Slate 100 */
+  --text-secondary: #CBD5E1;   /* Slate 300 */
+  --text-tertiary: #94A3B8;    /* Slate 400 */
+  --text-muted: #64748B;       /* Slate 500 */
+  --text-inverse: #0F172A;     /* Slate 900 */
+  
+  /* 边框 - 深色模式 */
+  --border-color: #334155;     /* Slate 700 */
+  --border-color-hover: #475569; /* Slate 600 */
+  --border-color-focus: var(--color-primary);
+  
+  /* 阴影 - 深色模式下更深 */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
+  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
+  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+}
+
+/* ========== 通用配置（不随主题变化） ========== */
+:root {
+  /* 间距系统 (8px 基准) */
   --spacing-0: 0;
   --spacing-1: 4px;
   --spacing-2: 8px;
@@ -78,12 +166,6 @@
   --radius-xl: 12px;
   --radius-2xl: 16px;
   --radius-full: 9999px;
-  
-  /* ========== 阴影 ========== */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
   
   /* ========== 字体 ========== */
   --font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
