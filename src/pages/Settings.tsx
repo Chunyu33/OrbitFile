@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import { FolderCog, Shield, CheckCircle, ChevronRight, User, Mail, Info, AlertTriangle, Lightbulb } from 'lucide-react';
+import { FolderCog, Shield, CheckCircle, ChevronRight, User, Mail, Info, AlertTriangle, Lightbulb, FolderArchive } from 'lucide-react';
 
 // 应用配置信息
 const APP_INFO = {
@@ -281,7 +281,7 @@ export default function Settings() {
           </div>
 
           {/* 注意事项 */}
-          <div style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
+          <div style={{ padding: 'var(--spacing-4) var(--spacing-5)', borderBottom: '1px solid var(--border-color)' }}>
             <div className="flex items-start" style={{ gap: 'var(--spacing-3)' }}>
               <div 
                 className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
@@ -300,6 +300,61 @@ export default function Settings() {
                   <li>目标磁盘必须是 NTFS 格式的本地磁盘</li>
                   <li>迁移后请勿删除目标位置的文件</li>
                 </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* 大文件目录迁移说明 */}
+          <div style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
+            <div className="flex items-start" style={{ gap: 'var(--spacing-3)' }}>
+              <div 
+                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--color-danger-light)' }}
+              >
+                <FolderArchive className="w-4 h-4" style={{ color: 'var(--color-danger)' }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-medium)', color: 'var(--text-primary)', marginBottom: 'var(--spacing-2)' }}>
+                  大文件目录迁移说明
+                </p>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-tertiary)', lineHeight: '1.8' }}>
+                  <p style={{ marginBottom: 'var(--spacing-2)' }}>
+                    <strong style={{ color: 'var(--color-danger)' }}>⚠️ 与系统自带"更改位置"功能的区别：</strong>
+                  </p>
+                  <ul style={{ paddingLeft: 'var(--spacing-4)', margin: '0 0 var(--spacing-3) 0' }}>
+                    <li>
+                      <strong style={{ color: 'var(--text-secondary)' }}>Windows 属性 → 位置 → 移动</strong>：
+                      修改的是 Shell 文件夹的注册表指向，系统会将该文件夹视为新位置，<strong style={{ color: 'var(--color-primary)' }}>原路径将不再存在</strong>
+                    </li>
+                    <li>
+                      <strong style={{ color: 'var(--text-secondary)' }}>OrbitFile 迁移</strong>：
+                      使用 Junction（目录联接）技术，<strong style={{ color: 'var(--color-primary)' }}>原路径仍然可用</strong>，只是指向了新位置
+                    </li>
+                  </ul>
+                  
+                  <p style={{ marginBottom: 'var(--spacing-2)' }}>
+                    <strong style={{ color: 'var(--color-warning)' }}>🔄 二次迁移兼容性：</strong>
+                  </p>
+                  <ul style={{ paddingLeft: 'var(--spacing-4)', margin: '0 0 var(--spacing-3) 0' }}>
+                    <li>
+                      如果您<strong style={{ color: 'var(--text-secondary)' }}>已使用系统自带功能更改过位置</strong>，
+                      OrbitFile 会检测到新的实际路径并正常工作
+                    </li>
+                    <li>
+                      <strong style={{ color: 'var(--color-danger)' }}>不建议</strong>对同一文件夹同时使用两种方式迁移
+                    </li>
+                  </ul>
+
+                  <p style={{ marginBottom: 'var(--spacing-2)' }}>
+                    <strong style={{ color: 'var(--color-danger)' }}>❗ 系统文件夹迁移风险：</strong>
+                  </p>
+                  <ul style={{ paddingLeft: 'var(--spacing-4)', margin: 0 }}>
+                    <li>桌面、文档、下载等系统文件夹与 Windows Shell 深度集成</li>
+                    <li>迁移后可能影响 OneDrive 同步、快速访问等功能</li>
+                    <li>部分应用可能无法正确识别 Junction 链接</li>
+                    <li><strong style={{ color: 'var(--color-success)' }}>建议</strong>：优先迁移微信、QQ、钉钉等应用数据，风险较低</li>
+                  </ul>
+                </div>
               </div>
             </div>
           </div>

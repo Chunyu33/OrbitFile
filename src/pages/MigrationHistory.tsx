@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { History, RotateCcw, Folder, FolderOutput, HardDrive, RefreshCw, Loader2 } from 'lucide-react';
+import { History, RotateCcw, Folder, FolderOutput, HardDrive, RefreshCw, Loader2, FolderArchive, AppWindow } from 'lucide-react';
 import { MigrationRecord, MigrationResult } from '../types';
 import Toast, { useToast } from '../components/Toast';
 
@@ -35,26 +35,45 @@ function HistoryCard({
   isRestoring 
 }: { 
   record: MigrationRecord; 
-  onRestore: (id: string) => void;
+  onRestore: (id: string, recordType: string) => void;
   isRestoring: boolean;
 }) {
+  // 判断记录类型（兼容旧数据，默认为 App）
+  const isLargeFolder = record.record_type === 'LargeFolder';
+  const iconBgColor = isLargeFolder ? 'var(--color-warning)' : 'var(--color-primary)';
+  
   return (
     <div className="card card-hover" style={{ padding: 'var(--spacing-5)' }}>
-      {/* 应用名称和时间 */}
+      {/* 名称和时间 */}
       <div className="flex items-start justify-between" style={{ marginBottom: 'var(--spacing-4)' }}>
         <div className="flex items-center" style={{ gap: 'var(--spacing-3)' }}>
           <div 
             className="w-10 h-10 rounded-lg flex items-center justify-center"
-            style={{ background: 'var(--color-primary)' }}
+            style={{ background: iconBgColor }}
           >
-            <span style={{ color: 'white', fontWeight: 'var(--font-weight-semibold)', fontSize: 'var(--font-size-sm)' }}>
-              {record.app_name.charAt(0).toUpperCase()}
-            </span>
+            {isLargeFolder ? (
+              <FolderArchive className="w-5 h-5" style={{ color: 'white' }} />
+            ) : (
+              <AppWindow className="w-5 h-5" style={{ color: 'white' }} />
+            )}
           </div>
           <div>
-            <h3 style={{ color: 'var(--text-primary)', fontWeight: 'var(--font-weight-semibold)', fontSize: 'var(--font-size-sm)' }}>
-              {record.app_name}
-            </h3>
+            <div className="flex items-center" style={{ gap: 'var(--spacing-2)' }}>
+              <h3 style={{ color: 'var(--text-primary)', fontWeight: 'var(--font-weight-semibold)', fontSize: 'var(--font-size-sm)' }}>
+                {record.app_name}
+              </h3>
+              <span 
+                style={{ 
+                  fontSize: '10px', 
+                  padding: '1px 6px', 
+                  borderRadius: '4px',
+                  background: isLargeFolder ? 'var(--color-warning-light)' : 'var(--color-primary-light)',
+                  color: isLargeFolder ? 'var(--color-warning)' : 'var(--color-primary)',
+                }}
+              >
+                {isLargeFolder ? '文件夹' : '应用'}
+              </span>
+            </div>
             <p style={{ color: 'var(--text-muted)', fontSize: 'var(--font-size-xs)', marginTop: '2px' }}>
               {formatDate(record.migrated_at)}
             </p>
@@ -91,7 +110,7 @@ function HistoryCard({
 
       {/* 恢复按钮 */}
       <button
-        onClick={() => onRestore(record.id)}
+        onClick={() => onRestore(record.id, record.record_type || 'App')}
         disabled={isRestoring}
         className="btn btn-secondary w-full"
       >
@@ -144,14 +163,27 @@ export default function MigrationHistory() {
     }
   }
 
-  // 恢复应用
-  async function handleRestore(historyId: string) {
+  // 恢复应用或文件夹
+  async function handleRestore(historyId: string, recordType: string) {
     try {
       setRestoringId(historyId);
-      const result = await invoke<MigrationResult>('restore_app', { historyId });
+      
+      // 根据记录类型调用不同的恢复命令
+      const record = records.find(r => r.id === historyId);
+      let result: MigrationResult;
+      
+      if (recordType === 'LargeFolder' && record) {
+        // 大文件夹恢复：使用原始路径调用 restore_large_folder
+        result = await invoke<MigrationResult>('restore_large_folder', { 
+          junctionPath: record.original_path 
+        });
+      } else {
+        // 应用恢复：使用历史记录 ID 调用 restore_app
+        result = await invoke<MigrationResult>('restore_app', { historyId });
+      }
       
       if (result.success) {
-        showToast('应用已成功恢复到原位置', 'success');
+        showToast(recordType === 'LargeFolder' ? '文件夹已成功恢复到原位置' : '应用已成功恢复到原位置', 'success');
         // 重新加载历史记录
         await loadHistory();
       } else {
@@ -185,7 +217,7 @@ export default function MigrationHistory() {
               <div className="flex items-center" style={{ gap: 'var(--spacing-4)' }}>
                 <span className="badge badge-primary">
                   <History className="w-3 h-3" />
-                  {records.length} 个应用
+                  {records.length} 项迁移
                 </span>
                 <span className="badge badge-success">
                   <HardDrive className="w-3 h-3" />

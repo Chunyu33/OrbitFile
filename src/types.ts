@@ -42,7 +42,39 @@ export interface DiskUsage {
 /**
  * Tab 页面类型枚举
  */
-export type TabType = 'migration' | 'history' | 'settings';
+export type TabType = 'migration' | 'folders' | 'history' | 'settings';
+
+/**
+ * 大文件夹类型枚举
+ */
+export type LargeFolderType = 'System' | 'AppData';
+
+/**
+ * 大文件夹信息接口
+ * 对应 Rust 后端的 LargeFolder 结构体
+ */
+export interface LargeFolder {
+  // 文件夹唯一标识
+  id: string;
+  // 显示名称
+  display_name: string;
+  // 文件夹完整路径
+  path: string;
+  // 文件夹大小（字节）
+  size: number;
+  // 文件夹类型
+  folder_type: LargeFolderType;
+  // 是否已经是 Junction（已迁移）
+  is_junction: boolean;
+  // Junction 目标路径
+  junction_target: string | null;
+  // 关联的应用进程名称
+  app_process_names: string[];
+  // 图标标识
+  icon_id: string;
+  // 是否存在
+  exists: boolean;
+}
 
 /**
  * 迁移结果接口
@@ -80,13 +112,18 @@ export type MigrationStep =
   | 'error';         // 迁移失败
 
 /**
+ * 迁移记录类型枚举
+ */
+export type MigrationRecordType = 'App' | 'LargeFolder';
+
+/**
  * 迁移历史记录接口
  * 对应 Rust 后端的 MigrationRecord 结构体
  */
 export interface MigrationRecord {
   // 唯一标识符
   id: string;
-  // 应用名称
+  // 应用/文件夹名称
   app_name: string;
   // 原始路径
   original_path: string;
@@ -98,4 +135,6 @@ export interface MigrationRecord {
   migrated_at: number;
   // 状态
   status: string;
+  // 记录类型：App（应用）或 LargeFolder（大文件夹）
+  record_type: MigrationRecordType;
 }

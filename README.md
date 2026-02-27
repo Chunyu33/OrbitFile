@@ -54,6 +54,9 @@ Windows 用户经常面临以下困扰：
 │  │  • restore_app           恢复应用         │               │
 │  │  • open_folder           打开文件夹       │               │
 │  │  • get_migration_history 获取迁移历史     │               │
+│  │  • get_large_folders     获取大文件夹列表 │               │
+│  │  • migrate_large_folder  迁移大文件夹     │               │
+│  │  • restore_large_folder  恢复大文件夹     │               │
 │  ├──────────────────────────────────────────┤               │
 │  │  Core Logic                               │               │
 │  │  • 注册表扫描 (winreg)                    │               │
@@ -82,6 +85,7 @@ orbit-file/
 │   │   └── Toast.tsx            # 通知组件
 │   ├── pages/                    # 页面
 │   │   ├── AppMigration.tsx     # 应用迁移页
+│   │   ├── LargeFolders.tsx     # 大文件目录页
 │   │   ├── MigrationHistory.tsx # 迁移历史页
 │   │   └── Settings.tsx         # 设置页
 │   ├── styles/                   # 样式系统
@@ -193,6 +197,29 @@ OrbitFile 使用 Windows Win32 API 提取应用的真实图标：
 - 支持横向滚动，适配多分区用户
 - 系统盘（C:）优先显示并高亮
 - 根据使用率显示不同颜色（绿色 < 70% < 黄色 < 90% < 红色）
+
+### 大文件目录迁移
+
+支持迁移系统文件夹和办公软件数据目录：
+
+**系统文件夹：**
+- 桌面 (Desktop)
+- 文档 (Documents)
+- 下载 (Downloads)
+- 图片 (Pictures)
+- 视频 (Videos)
+
+**办公软件数据：**
+- 微信 (`%USERPROFILE%\Documents\WeChat Files`)
+- 企业微信 (`%USERPROFILE%\Documents\WXWork`)
+- QQ (`%USERPROFILE%\Documents\Tencent Files`)
+- 钉钉 (`%APPDATA%\DingTalk`)
+- 飞书 (`%APPDATA%\LarkShell` 或 `%LOCALAPPDATA%\LarkShell`)
+
+**安全特性：**
+- 系统文件夹迁移前显示风险警告
+- 自动检测进程占用，提示关闭相关应用
+- 支持一键恢复到原位置
 
 ### 设置持久化
 

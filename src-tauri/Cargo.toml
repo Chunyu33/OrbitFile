@@ -36,6 +36,8 @@ base64 = "0.22"
 image = "0.25"
 # 延迟初始化静态变量，用于图标缓存
 lazy_static = "1.5"
+# 获取系统特殊文件夹路径（桌面、文档、下载等）
+dirs = "5.0"
 
 # Windows API 绑定，用于提取应用图标
 [target.'cfg(windows)'.dependencies]

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import TitleBar from './components/TitleBar';
 import TabBar from './components/TabBar';
 import AppMigration from './pages/AppMigration';
+import LargeFolders from './pages/LargeFolders';
 import MigrationHistory from './pages/MigrationHistory';
 import Settings from './pages/Settings';
 import { TabType } from './types';
@@ -17,6 +18,8 @@ function App() {
     switch (activeTab) {
       case 'migration':
         return <AppMigration />;
+      case 'folders':
+        return <LargeFolders />;
       case 'history':
         return <MigrationHistory />;
       case 'settings':
