@@ -27,16 +27,52 @@ function getAvatarColor(name: string, isMigrated: boolean): string {
   return colors[name.charCodeAt(0) % colors.length];
 }
 
-// 打开文件夹
+// 打开文件夹 - 使用 Rust 后端命令
 async function openFolder(path: string) {
   try {
-    // revealItemInDir 需要一个存在的路径
-    // 如果目录本身存在，尝试打开目录下的任意文件或目录本身
-    const { openPath } = await import('@tauri-apps/plugin-opener');
-    await openPath(path);
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('open_folder', { path });
   } catch (error) {
     console.error('打开文件夹失败:', error);
   }
+}
+
+// 应用图标组件 - 显示真实图标或首字母回退
+function AppIcon({ app, isMigrated }: { app: InstalledApp; isMigrated: boolean }) {
+  const initial = app.display_name.charAt(0).toUpperCase();
+  const bgColor = getAvatarColor(app.display_name, isMigrated);
+  
+  // 如果有 Base64 图标数据，显示真实图标
+  if (app.icon_base64) {
+    return (
+      <div 
+        className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden"
+        style={{ backgroundColor: 'var(--color-gray-100)' }}
+      >
+        <img 
+          src={app.icon_base64} 
+          alt={app.display_name}
+          className="w-8 h-8 object-contain"
+          onError={(e) => {
+            // 图标加载失败时隐藏图片，显示首字母
+            (e.target as HTMLImageElement).style.display = 'none';
+          }}
+        />
+      </div>
+    );
+  }
+  
+  // 回退到首字母图标
+  return (
+    <div 
+      className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
+      style={{ backgroundColor: bgColor }}
+    >
+      <span style={{ color: 'white', fontWeight: 'var(--font-weight-semibold)', fontSize: 'var(--font-size-sm)' }}>
+        {initial}
+      </span>
+    </div>
+  );
 }
 
 // 应用卡片组件
@@ -49,23 +85,13 @@ function AppCard({
   onMigrate: (app: InstalledApp) => void;
   isMigrated: boolean;
 }) {
-  const initial = app.display_name.charAt(0).toUpperCase();
-  const bgColor = getAvatarColor(app.display_name, isMigrated);
-
   return (
     <div 
       className={`list-item ${isMigrated ? 'list-item-migrated' : ''}`}
       style={{ padding: 'var(--spacing-4)' }}
     >
       {/* 应用图标 */}
-      <div 
-        className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-        style={{ backgroundColor: bgColor }}
-      >
-        <span style={{ color: 'white', fontWeight: 'var(--font-weight-semibold)', fontSize: 'var(--font-size-sm)' }}>
-          {initial}
-        </span>
-      </div>
+      <AppIcon app={app} isMigrated={isMigrated} />
 
       {/* 应用信息 */}
       <div className="flex-1 min-w-0">

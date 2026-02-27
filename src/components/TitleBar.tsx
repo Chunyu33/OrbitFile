@@ -1,6 +1,7 @@
 // 自定义标题栏组件
 // 实现窗口拖拽、最小化、关闭功能
 
+import { useState } from 'react';
 import { Minus, X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
@@ -39,6 +40,8 @@ function AppIcon() {
 
 export default function TitleBar() {
   const appWindow = getCurrentWindow();
+  const [closeHover, setCloseHover] = useState(false);
+  const [minHover, setMinHover] = useState(false);
 
   async function handleMinimize() {
     await appWindow.minimize();
@@ -61,18 +64,45 @@ export default function TitleBar() {
       </div>
 
       {/* 右侧窗口控制按钮 */}
-      <div className="flex items-center">
+      <div className="flex items-center h-full">
+        {/* 最小化按钮 */}
         <button
           onClick={handleMinimize}
-          className="w-11 h-9 flex items-center justify-center hover:bg-[#E5E5E5] transition-colors"
+          onMouseEnter={() => setMinHover(true)}
+          onMouseLeave={() => setMinHover(false)}
+          style={{
+            width: '46px',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: minHover ? '#E5E5E5' : 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            transition: 'background 0.15s ease',
+          }}
         >
-          <Minus className="w-4 h-4 text-[#666666]" />
+          <Minus style={{ width: '16px', height: '16px', color: '#666666' }} />
         </button>
+        
+        {/* 关闭按钮 */}
         <button
           onClick={handleClose}
-          className="w-11 h-9 flex items-center justify-center hover:bg-[#E81123] transition-colors group"
+          onMouseEnter={() => setCloseHover(true)}
+          onMouseLeave={() => setCloseHover(false)}
+          style={{
+            width: '46px',
+            height: '100%',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: closeHover ? '#E81123' : 'transparent',
+            border: 'none',
+            cursor: 'pointer',
+            transition: 'background 0.15s ease',
+          }}
         >
-          <X className="w-4 h-4 text-[#666666] group-hover:text-white" />
+          <X style={{ width: '16px', height: '16px', color: closeHover ? 'white' : '#666666', transition: 'color 0.15s ease' }} />
         </button>
       </div>
     </div>

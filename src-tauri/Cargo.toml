@@ -30,4 +30,19 @@ sysinfo = "0.31"
 fs_extra = "1.3"
 # Tauri 对话框插件，用于目录选择
 tauri-plugin-dialog = "2"
+# Base64 编码，用于图标数据传输
+base64 = "0.22"
+# 图像处理，用于图标格式转换
+image = "0.25"
+# 延迟初始化静态变量，用于图标缓存
+lazy_static = "1.5"
+
+# Windows API 绑定，用于提取应用图标
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.58", features = [
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_Graphics_Gdi",
+    "Win32_Foundation",
+    "Win32_UI_Shell",
+] }
 

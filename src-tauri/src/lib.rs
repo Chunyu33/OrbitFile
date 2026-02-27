@@ -5,8 +5,14 @@ use serde::{Deserialize, Serialize};
 use sysinfo::{Disks, System};
 use std::path::{Path, PathBuf};
 use std::fs;
-use std::io::{Read, Write};
+use std::io::{Read, Write, Cursor};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+// Base64 编码，用于图标数据传输
+use base64::Engine;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 
 // 仅在 Windows 平台编译 winreg 和 symlink 相关代码
 #[cfg(windows)]
@@ -16,8 +22,29 @@ use winreg::RegKey;
 #[cfg(windows)]
 use std::os::windows::fs::symlink_dir;
 
+// Windows API 绑定，用于提取应用图标
+#[cfg(windows)]
+use windows::Win32::UI::WindowsAndMessaging::{
+    DestroyIcon, GetIconInfo, ICONINFO,
+};
+#[cfg(windows)]
+use windows::Win32::UI::Shell::ExtractIconExW;
+#[cfg(windows)]
+use windows::Win32::Graphics::Gdi::{
+    GetDIBits, CreateCompatibleDC, DeleteDC, SelectObject, GetObjectW,
+    BITMAP, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS, DeleteObject,
+};
+#[cfg(windows)]
+use windows::core::PCWSTR;
+
 // fs_extra 用于递归复制文件夹和移动文件夹
 use fs_extra::dir::{copy, move_dir, CopyOptions, get_size};
+
+// 图标缓存：使用 Mutex 保护的 HashMap 存储已提取的图标
+// 键为图标路径，值为 Base64 编码的图标数据
+lazy_static::lazy_static! {
+    static ref ICON_CACHE: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
+}
 
 /// 已安装应用信息结构体
 /// 包含从 Windows 注册表读取的应用基本信息
@@ -31,6 +58,251 @@ pub struct InstalledApp {
     pub display_icon: String,
     /// 预估大小（KB）
     pub estimated_size: u64,
+    /// 应用图标的 Base64 编码数据（PNG 格式）
+    /// 如果提取失败则为空字符串
+    pub icon_base64: String,
+}
+
+/// 从 EXE/DLL 文件中提取图标并转换为 Base64 编码的 PNG
+/// 
+/// # 技术实现说明
+/// 使用 Windows Win32 API 提取图标：
+/// 1. ExtractIconExW - 从可执行文件或 DLL 中提取图标句柄
+/// 2. GetIconInfo - 获取图标的位图信息
+/// 3. GetDIBits - 将位图转换为像素数据
+/// 4. 使用 image crate 将像素数据编码为 PNG
+/// 5. 使用 base64 crate 将 PNG 数据编码为 Base64 字符串
+///
+/// # 参数
+/// - `icon_path`: 图标路径，可能包含索引（如 "C:\app.exe,0"）
+///
+/// # 返回
+/// - 成功时返回 Base64 编码的 PNG 图标数据
+/// - 失败时返回空字符串
+#[cfg(windows)]
+fn extract_icon_to_base64(icon_path: &str) -> String {
+    // 检查缓存，避免重复提取
+    if let Ok(cache) = ICON_CACHE.lock() {
+        if let Some(cached) = cache.get(icon_path) {
+            return cached.clone();
+        }
+    }
+
+    // 解析图标路径和索引
+    // 格式可能是 "C:\path\app.exe" 或 "C:\path\app.exe,0" 或 "C:\path\app.exe,-101"
+    let (file_path, icon_index) = parse_icon_path(icon_path);
+    
+    // 检查文件是否存在
+    if !Path::new(&file_path).exists() {
+        return String::new();
+    }
+
+    // 将路径转换为宽字符串（Windows API 需要）
+    let wide_path: Vec<u16> = file_path.encode_utf16().chain(std::iter::once(0)).collect();
+    
+    unsafe {
+        // 用于存储提取的图标句柄
+        let mut large_icon = windows::Win32::UI::WindowsAndMessaging::HICON::default();
+        
+        // 调用 ExtractIconExW 提取图标
+        // 参数说明：
+        // - lpszFile: 文件路径
+        // - nIconIndex: 图标索引（负数表示资源 ID）
+        // - phiconLarge: 大图标句柄输出
+        // - phiconSmall: 小图标句柄输出（我们不需要）
+        // - nIcons: 要提取的图标数量
+        let result = ExtractIconExW(
+            PCWSTR::from_raw(wide_path.as_ptr()),
+            icon_index,
+            Some(&mut large_icon),
+            None,
+            1,
+        );
+
+        // 检查是否成功提取图标
+        if result == 0 || large_icon.is_invalid() {
+            return String::new();
+        }
+
+        // 将图标转换为 Base64
+        let base64_result = icon_to_base64(large_icon);
+        
+        // 销毁图标句柄，释放资源
+        let _ = DestroyIcon(large_icon);
+
+        // 缓存结果
+        if !base64_result.is_empty() {
+            if let Ok(mut cache) = ICON_CACHE.lock() {
+                cache.insert(icon_path.to_string(), base64_result.clone());
+            }
+        }
+
+        base64_result
+    }
+}
+
+/// 解析图标路径，分离文件路径和图标索引
+/// 
+/// # 示例
+/// - "C:\app.exe" -> ("C:\app.exe", 0)
+/// - "C:\app.exe,0" -> ("C:\app.exe", 0)
+/// - "C:\app.exe,-101" -> ("C:\app.exe", -101)
+/// - "\"C:\Program Files\app.exe\",0" -> ("C:\Program Files\app.exe", 0)
+#[cfg(windows)]
+fn parse_icon_path(icon_path: &str) -> (String, i32) {
+    // 去除首尾空格和引号
+    let path = icon_path.trim().trim_matches('"');
+    
+    // 查找最后一个逗号（图标索引分隔符）
+    if let Some(comma_pos) = path.rfind(',') {
+        let file_part = &path[..comma_pos];
+        let index_part = &path[comma_pos + 1..];
+        
+        // 尝试解析索引
+        if let Ok(index) = index_part.trim().parse::<i32>() {
+            return (file_part.trim().trim_matches('"').to_string(), index);
+        }
+    }
+    
+    // 没有索引，默认使用 0
+    (path.trim_matches('"').to_string(), 0)
+}
+
+/// 将 HICON 图标句柄转换为 Base64 编码的 PNG 数据
+/// 
+/// # 技术实现
+/// 1. 使用 GetIconInfo 获取图标的颜色位图和掩码位图
+/// 2. 使用 GetDIBits 将位图转换为 BGRA 像素数据
+/// 3. 将 BGRA 转换为 RGBA 格式
+/// 4. 使用 image crate 创建 PNG 图像
+/// 5. 使用 base64 编码
+#[cfg(windows)]
+fn icon_to_base64(icon: windows::Win32::UI::WindowsAndMessaging::HICON) -> String {
+    unsafe {
+        // 获取图标信息
+        let mut icon_info = ICONINFO::default();
+        if GetIconInfo(icon, &mut icon_info).is_err() {
+            return String::new();
+        }
+
+        // 获取颜色位图信息
+        let hbm_color = icon_info.hbmColor;
+        if hbm_color.is_invalid() {
+            // 清理资源
+            if !icon_info.hbmMask.is_invalid() {
+                let _ = DeleteObject(icon_info.hbmMask);
+            }
+            return String::new();
+        }
+
+        // 获取位图尺寸
+        let mut bitmap = BITMAP::default();
+        let bitmap_size = std::mem::size_of::<BITMAP>() as i32;
+        if GetObjectW(hbm_color, bitmap_size, Some(&mut bitmap as *mut _ as *mut _)) == 0 {
+            let _ = DeleteObject(hbm_color);
+            if !icon_info.hbmMask.is_invalid() {
+                let _ = DeleteObject(icon_info.hbmMask);
+            }
+            return String::new();
+        }
+
+        let width = bitmap.bmWidth as u32;
+        let height = bitmap.bmHeight as u32;
+        
+        // 限制图标大小，避免处理过大的图标
+        if width == 0 || height == 0 || width > 256 || height > 256 {
+            let _ = DeleteObject(hbm_color);
+            if !icon_info.hbmMask.is_invalid() {
+                let _ = DeleteObject(icon_info.hbmMask);
+            }
+            return String::new();
+        }
+
+        // 创建设备上下文
+        let hdc = CreateCompatibleDC(None);
+        if hdc.is_invalid() {
+            let _ = DeleteObject(hbm_color);
+            if !icon_info.hbmMask.is_invalid() {
+                let _ = DeleteObject(icon_info.hbmMask);
+            }
+            return String::new();
+        }
+
+        // 选择位图到设备上下文
+        let old_bitmap = SelectObject(hdc, hbm_color);
+
+        // 准备 BITMAPINFO 结构
+        let mut bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: width as i32,
+                biHeight: -(height as i32), // 负值表示自上而下的位图
+                biPlanes: 1,
+                biBitCount: 32, // 32 位 BGRA
+                biCompression: 0, // BI_RGB
+                biSizeImage: 0,
+                biXPelsPerMeter: 0,
+                biYPelsPerMeter: 0,
+                biClrUsed: 0,
+                biClrImportant: 0,
+            },
+            bmiColors: [windows::Win32::Graphics::Gdi::RGBQUAD::default(); 1],
+        };
+
+        // 分配像素缓冲区
+        let pixel_count = (width * height) as usize;
+        let mut pixels: Vec<u8> = vec![0; pixel_count * 4];
+
+        // 获取位图像素数据
+        let result = GetDIBits(
+            hdc,
+            hbm_color,
+            0,
+            height,
+            Some(pixels.as_mut_ptr() as *mut _),
+            &mut bmi,
+            DIB_RGB_COLORS,
+        );
+
+        // 清理资源
+        SelectObject(hdc, old_bitmap);
+        let _ = DeleteDC(hdc);
+        let _ = DeleteObject(hbm_color);
+        if !icon_info.hbmMask.is_invalid() {
+            let _ = DeleteObject(icon_info.hbmMask);
+        }
+
+        if result == 0 {
+            return String::new();
+        }
+
+        // 将 BGRA 转换为 RGBA
+        for i in 0..pixel_count {
+            let offset = i * 4;
+            pixels.swap(offset, offset + 2); // 交换 B 和 R
+        }
+
+        // 使用 image crate 创建 PNG
+        match image::RgbaImage::from_raw(width, height, pixels) {
+            Some(img) => {
+                let mut png_data = Cursor::new(Vec::new());
+                if img.write_to(&mut png_data, image::ImageFormat::Png).is_ok() {
+                    // 编码为 Base64
+                    let base64_str = BASE64_STANDARD.encode(png_data.into_inner());
+                    format!("data:image/png;base64,{}", base64_str)
+                } else {
+                    String::new()
+                }
+            }
+            None => String::new(),
+        }
+    }
+}
+
+/// 非 Windows 平台的图标提取占位函数
+#[cfg(not(windows))]
+fn extract_icon_to_base64(_icon_path: &str) -> String {
+    String::new()
 }
 
 /// 磁盘使用信息结构体
@@ -96,6 +368,7 @@ fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
                                     install_location,
                                     display_icon,
                                     estimated_size,
+                                    icon_base64: String::new(), // 先设为空，稍后批量提取
                                 });
                             }
                         }
@@ -106,6 +379,14 @@ fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
 
         // 按应用名称排序
         apps.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+        
+        // 为每个应用提取图标（使用缓存避免重复提取）
+        // 注意：图标提取可能较慢，但缓存机制可以加速后续加载
+        for app in apps.iter_mut() {
+            if !app.display_icon.is_empty() {
+                app.icon_base64 = extract_icon_to_base64(&app.display_icon);
+            }
+        }
         
         Ok(apps)
     }
@@ -773,6 +1054,47 @@ fn restore_app(history_id: String) -> Result<MigrationResult, String> {
     }
 }
 
+/// 在资源管理器中打开指定文件夹
+/// 使用 Windows 的 explorer.exe 命令打开目录
+#[tauri::command]
+fn open_folder(path: String) -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        
+        // 检查路径是否存在
+        let path_obj = Path::new(&path);
+        if !path_obj.exists() {
+            return Err(format!("路径不存在: {}", path));
+        }
+        
+        // 使用 explorer.exe 打开文件夹
+        // 如果是文件，打开其所在目录并选中该文件
+        // 如果是目录，直接打开该目录
+        let result = if path_obj.is_dir() {
+            Command::new("explorer")
+                .arg(&path)
+                .spawn()
+        } else {
+            // 如果是文件，使用 /select 参数选中该文件
+            Command::new("explorer")
+                .arg("/select,")
+                .arg(&path)
+                .spawn()
+        };
+        
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => Err(format!("打开文件夹失败: {}", e)),
+        }
+    }
+    
+    #[cfg(not(windows))]
+    {
+        Err("此功能仅支持 Windows 系统".to_string())
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -786,7 +1108,8 @@ pub fn run() {
             migrate_app,
             get_migration_history,
             get_migrated_paths,
-            restore_app
+            restore_app,
+            open_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

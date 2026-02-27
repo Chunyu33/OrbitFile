@@ -13,6 +13,9 @@ export interface InstalledApp {
   display_icon: string;
   // 预估大小（KB）
   estimated_size: number;
+  // 应用图标的 Base64 编码数据（PNG 格式）
+  // 如果提取失败则为空字符串
+  icon_base64: string;
 }
 
 /**
