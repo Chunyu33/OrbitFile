@@ -2,7 +2,6 @@
 // 企业级模块化设计
 
 import { Package, Search, CheckCircle2, FolderOpen, Link2 } from 'lucide-react';
-import { revealItemInDir } from '@tauri-apps/plugin-opener';
 import { InstalledApp } from '../types';
 import { useState, useMemo } from 'react';
 
@@ -31,7 +30,10 @@ function getAvatarColor(name: string, isMigrated: boolean): string {
 // 打开文件夹
 async function openFolder(path: string) {
   try {
-    await revealItemInDir(path);
+    // revealItemInDir 需要一个存在的路径
+    // 如果目录本身存在，尝试打开目录下的任意文件或目录本身
+    const { openPath } = await import('@tauri-apps/plugin-opener');
+    await openPath(path);
   } catch (error) {
     console.error('打开文件夹失败:', error);
   }

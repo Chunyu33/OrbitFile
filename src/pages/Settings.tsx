@@ -1,8 +1,56 @@
 // 设置页面
 // 企业级模块化设计
 
-import { useState } from 'react';
-import { FolderCog, Shield, CheckCircle, Info, ChevronRight } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { open } from '@tauri-apps/plugin-dialog';
+import { FolderCog, Shield, CheckCircle, ChevronRight, User, Mail, Info, AlertTriangle, Lightbulb } from 'lucide-react';
+
+// 应用配置信息
+const APP_INFO = {
+  name: 'OrbitFile',
+  version: '1.0.0',
+  description: '专业的 Windows 存储重定向工具',
+  author: 'Evan Lau',
+  email: '1378813463@qq.com',
+};
+
+// 关于信息列表（动态数据格式，方便后续扩展）
+const ABOUT_ITEMS = [
+  { label: '作者', value: APP_INFO.author, icon: User },
+  { label: '联系邮箱', value: APP_INFO.email, icon: Mail },
+];
+
+// 设置存储键名
+const SETTINGS_KEY = 'orbitfile_settings';
+
+// 默认设置
+const DEFAULT_SETTINGS = {
+  defaultTargetPath: 'D:\\Apps',
+  backupEnabled: true,
+  verifyEnabled: true,
+};
+
+// 加载设置
+function loadSettings() {
+  try {
+    const saved = localStorage.getItem(SETTINGS_KEY);
+    if (saved) {
+      return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+    }
+  } catch (e) {
+    console.error('加载设置失败:', e);
+  }
+  return DEFAULT_SETTINGS;
+}
+
+// 保存设置
+function saveSettings(settings: typeof DEFAULT_SETTINGS) {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch (e) {
+    console.error('保存设置失败:', e);
+  }
+}
 
 // 开关组件
 function Toggle({ active, onChange }: { active: boolean; onChange: () => void }) {
@@ -39,8 +87,39 @@ function Toggle({ active, onChange }: { active: boolean; onChange: () => void })
 }
 
 export default function Settings() {
-  const [backupEnabled, setBackupEnabled] = useState(true);
-  const [verifyEnabled, setVerifyEnabled] = useState(true);
+  const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const currentYear = new Date().getFullYear();
+
+  // 加载设置
+  useEffect(() => {
+    setSettings(loadSettings());
+  }, []);
+
+  // 更新设置
+  const updateSetting = <K extends keyof typeof DEFAULT_SETTINGS>(
+    key: K,
+    value: typeof DEFAULT_SETTINGS[K]
+  ) => {
+    const newSettings = { ...settings, [key]: value };
+    setSettings(newSettings);
+    saveSettings(newSettings);
+  };
+
+  // 选择默认迁移目标文件夹
+  const handleSelectTargetPath = async () => {
+    try {
+      const selected = await open({
+        directory: true,
+        multiple: false,
+        title: '选择默认迁移目标文件夹',
+      });
+      if (selected && typeof selected === 'string') {
+        updateSetting('defaultTargetPath', selected);
+      }
+    } catch (e) {
+      console.error('选择文件夹失败:', e);
+    }
+  };
 
   return (
     <div className="h-full overflow-auto" style={{ padding: 'var(--page-padding)' }}>
@@ -69,7 +148,23 @@ export default function Settings() {
           </div>
           
           {/* 默认目标路径 */}
-          <div className="setting-item" style={{ padding: 'var(--spacing-4) var(--spacing-5)', margin: 0, borderBottom: '1px solid var(--border-color)' }}>
+          <button 
+            onClick={handleSelectTargetPath}
+            className="setting-item" 
+            style={{ 
+              padding: 'var(--spacing-4) var(--spacing-5)', 
+              margin: 0, 
+              borderBottom: '1px solid var(--border-color)',
+              background: 'transparent',
+              border: 'none',
+              borderBottomWidth: '1px',
+              borderBottomStyle: 'solid',
+              borderBottomColor: 'var(--border-color)',
+              width: '100%',
+              cursor: 'pointer',
+              textAlign: 'left'
+            }}
+          >
             <div className="flex items-center" style={{ gap: 'var(--spacing-3)' }}>
               <div 
                 className="w-9 h-9 rounded-lg flex items-center justify-center"
@@ -83,10 +178,10 @@ export default function Settings() {
               </div>
             </div>
             <div className="flex items-center" style={{ gap: 'var(--spacing-2)' }}>
-              <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-tertiary)' }}>D:\Apps</span>
+              <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-tertiary)' }}>{settings.defaultTargetPath}</span>
               <ChevronRight className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
             </div>
-          </div>
+          </button>
 
           {/* 迁移前备份 */}
           <div className="setting-item" style={{ padding: 'var(--spacing-4) var(--spacing-5)', margin: 0, borderBottom: '1px solid var(--border-color)' }}>
@@ -102,7 +197,7 @@ export default function Settings() {
                 <p className="setting-desc">在迁移前自动备份原始文件</p>
               </div>
             </div>
-            <Toggle active={backupEnabled} onChange={() => setBackupEnabled(!backupEnabled)} />
+            <Toggle active={settings.backupEnabled} onChange={() => updateSetting('backupEnabled', !settings.backupEnabled)} />
           </div>
 
           {/* 验证完整性 */}
@@ -119,7 +214,94 @@ export default function Settings() {
                 <p className="setting-desc">迁移后校验文件哈希值</p>
               </div>
             </div>
-            <Toggle active={verifyEnabled} onChange={() => setVerifyEnabled(!verifyEnabled)} />
+            <Toggle active={settings.verifyEnabled} onChange={() => updateSetting('verifyEnabled', !settings.verifyEnabled)} />
+          </div>
+        </section>
+
+        {/* 使用说明 */}
+        <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div 
+            style={{ 
+              padding: 'var(--spacing-3) var(--spacing-5)',
+              background: 'var(--color-gray-50)',
+              borderBottom: '1px solid var(--border-color)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 'var(--font-weight-medium)',
+              color: 'var(--text-tertiary)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}
+          >
+            使用说明
+          </div>
+          
+          {/* 工作原理 */}
+          <div style={{ padding: 'var(--spacing-4) var(--spacing-5)', borderBottom: '1px solid var(--border-color)' }}>
+            <div className="flex items-start" style={{ gap: 'var(--spacing-3)' }}>
+              <div 
+                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--color-primary-light)' }}
+              >
+                <Info className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-medium)', color: 'var(--text-primary)', marginBottom: 'var(--spacing-2)' }}>
+                  工作原理
+                </p>
+                <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
+                  OrbitFile 使用 Windows 符号链接（Symbolic Link）技术，将应用文件夹从 C 盘移动到其他磁盘，
+                  并在原位置创建一个指向新位置的链接。系统和应用程序会透明地通过这个链接访问文件，
+                  因此应用可以正常运行，同时释放了 C 盘空间。
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* 解决的问题 */}
+          <div style={{ padding: 'var(--spacing-4) var(--spacing-5)', borderBottom: '1px solid var(--border-color)' }}>
+            <div className="flex items-start" style={{ gap: 'var(--spacing-3)' }}>
+              <div 
+                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--color-success-light)' }}
+              >
+                <Lightbulb className="w-4 h-4" style={{ color: 'var(--color-success)' }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-medium)', color: 'var(--text-primary)', marginBottom: 'var(--spacing-2)' }}>
+                  解决的问题
+                </p>
+                <ul style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-tertiary)', lineHeight: '1.8', paddingLeft: 'var(--spacing-4)', margin: 0 }}>
+                  <li>C 盘空间不足，系统运行缓慢</li>
+                  <li>大型应用占用过多系统盘空间</li>
+                  <li>手动移动应用文件夹会导致应用无法运行</li>
+                  <li>无需重新安装即可迁移应用</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          {/* 注意事项 */}
+          <div style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
+            <div className="flex items-start" style={{ gap: 'var(--spacing-3)' }}>
+              <div 
+                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--color-warning-light)' }}
+              >
+                <AlertTriangle className="w-4 h-4" style={{ color: 'var(--color-warning)' }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-medium)', color: 'var(--text-primary)', marginBottom: 'var(--spacing-2)' }}>
+                  注意事项
+                </p>
+                <ul style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-tertiary)', lineHeight: '1.8', paddingLeft: 'var(--spacing-4)', margin: 0 }}>
+                  <li>迁移前请关闭目标应用程序</li>
+                  <li>需要管理员权限才能创建符号链接</li>
+                  <li>不建议迁移系统核心组件和杀毒软件</li>
+                  <li>目标磁盘必须是 NTFS 格式的本地磁盘</li>
+                  <li>迁移后请勿删除目标位置的文件</li>
+                </ul>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -150,36 +332,48 @@ export default function Settings() {
                 <span style={{ color: 'white', fontWeight: 'var(--font-weight-bold)', fontSize: 'var(--font-size-sm)' }}>O</span>
               </div>
               <div>
-                <p className="setting-label">OrbitFile</p>
-                <p className="setting-desc">专业的 Windows 存储重定向工具</p>
+                <p className="setting-label">{APP_INFO.name}</p>
+                <p className="setting-desc">{APP_INFO.description}</p>
               </div>
             </div>
-            <span className="badge badge-primary">v0.1.0</span>
+            <span className="badge badge-primary">v{APP_INFO.version}</span>
           </div>
 
-          <div className="setting-item" style={{ padding: 'var(--spacing-4) var(--spacing-5)', margin: 0, borderBottom: '1px solid var(--border-color)' }}>
-            <span className="setting-label">技术栈</span>
-            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-tertiary)' }}>Tauri + Rust + React</span>
-          </div>
-
-          <div className="setting-item" style={{ padding: 'var(--spacing-4) var(--spacing-5)', margin: 0, border: 'none' }}>
-            <span className="setting-label">UI 框架</span>
-            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-tertiary)' }}>Tailwind CSS</span>
-          </div>
+          {/* 动态渲染关于信息列表 */}
+          {ABOUT_ITEMS.map((item, index) => (
+            <div 
+              key={item.label}
+              className="setting-item" 
+              style={{ 
+                padding: 'var(--spacing-4) var(--spacing-5)', 
+                margin: 0, 
+                borderBottom: index < ABOUT_ITEMS.length - 1 ? '1px solid var(--border-color)' : 'none'
+              }}
+            >
+              <div className="flex items-center" style={{ gap: 'var(--spacing-3)' }}>
+                <div 
+                  className="w-9 h-9 rounded-lg flex items-center justify-center"
+                  style={{ background: 'var(--color-gray-100)' }}
+                >
+                  <item.icon className="w-4 h-4" style={{ color: 'var(--text-tertiary)' }} />
+                </div>
+                <span className="setting-label">{item.label}</span>
+              </div>
+              <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-tertiary)' }}>{item.value}</span>
+            </div>
+          ))}
         </section>
 
-        {/* 提示 */}
+        {/* 版权声明 */}
         <div 
           className="flex items-center justify-center" 
           style={{ 
-            gap: 'var(--spacing-2)', 
             padding: 'var(--spacing-4)',
             color: 'var(--text-muted)',
             fontSize: 'var(--font-size-xs)'
           }}
         >
-          <Info className="w-4 h-4" />
-          <span>更多设置选项将在后续版本中开放</span>
+          <span>© {currentYear} {APP_INFO.name}. All rights reserved.</span>
         </div>
       </div>
     </div>

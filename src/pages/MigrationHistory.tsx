@@ -172,13 +172,27 @@ export default function MigrationHistory() {
   const totalSize = records.reduce((sum, r) => sum + r.size, 0);
 
   return (
-    <div className="h-full overflow-auto" style={{ padding: 'var(--page-padding)' }}>
-      <div className="h-full max-w-5xl mx-auto flex flex-col" style={{ gap: 'var(--spacing-6)' }}>
-        {/* 标题栏 */}
-        <header className="page-header">
-          <div>
-            <h1 className="page-title">迁移历史</h1>
-            <p className="page-subtitle">查看已迁移的应用，支持一键恢复</p>
+    <div className="h-full overflow-hidden flex flex-col" style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
+      <div className="h-full max-w-5xl mx-auto flex flex-col w-full" style={{ gap: 'var(--spacing-3)' }}>
+        {/* 顶部：标题 + 统计 + 刷新按钮（紧凑单行） */}
+        <header className="flex items-center justify-between flex-shrink-0">
+          <div className="flex items-center" style={{ gap: 'var(--spacing-6)' }}>
+            <h1 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--text-primary)' }}>
+              迁移历史
+            </h1>
+            {/* 内联统计信息 */}
+            {records.length > 0 && (
+              <div className="flex items-center" style={{ gap: 'var(--spacing-4)' }}>
+                <span className="badge badge-primary">
+                  <History className="w-3 h-3" />
+                  {records.length} 个应用
+                </span>
+                <span className="badge badge-success">
+                  <HardDrive className="w-3 h-3" />
+                  已释放 {formatSize(totalSize)}
+                </span>
+              </div>
+            )}
           </div>
           <button
             onClick={loadHistory}
@@ -189,30 +203,6 @@ export default function MigrationHistory() {
             刷新
           </button>
         </header>
-
-        {/* 统计卡片 */}
-        {records.length > 0 && (
-          <div className="grid grid-cols-2" style={{ gap: 'var(--spacing-4)' }}>
-            <div className="stat-card">
-              <div className="stat-icon stat-icon-primary">
-                <History className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="stat-value">{records.length}</p>
-                <p className="stat-label">已迁移应用</p>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-icon stat-icon-success">
-                <HardDrive className="w-6 h-6" />
-              </div>
-              <div>
-                <p className="stat-value" style={{ color: 'var(--color-success)' }}>{formatSize(totalSize)}</p>
-                <p className="stat-label">已释放空间</p>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* 内容区 */}
         {loading ? (
