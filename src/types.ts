@@ -16,6 +16,21 @@ export interface InstalledApp {
   // 应用图标的 Base64 编码数据（PNG 格式）
   // 如果提取失败则为空字符串
   icon_base64: string;
+  // 应用对应注册表路径（用于强力卸载）
+  registry_path: string;
+}
+
+/**
+ * 卸载结果接口
+ * 对应 Rust 后端的 UninstallResult 结构体
+ */
+export interface UninstallResult {
+  // 是否成功启动卸载器
+  success: boolean;
+  // 返回消息
+  message: string;
+  // 实际执行的卸载命令
+  command: string | null;
 }
 
 /**

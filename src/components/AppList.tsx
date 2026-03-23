@@ -9,6 +9,8 @@ interface AppListProps {
   apps: InstalledApp[];
   loading: boolean;
   onMigrate: (app: InstalledApp) => void;
+  onRestore: (app: InstalledApp) => void;
+  onUninstall: (app: InstalledApp) => void;
   migratedPaths?: string[];
 }
 
@@ -79,10 +81,14 @@ function AppIcon({ app, isMigrated }: { app: InstalledApp; isMigrated: boolean }
 function AppCard({ 
   app, 
   onMigrate, 
+  onRestore,
+  onUninstall,
   isMigrated 
 }: { 
   app: InstalledApp; 
   onMigrate: (app: InstalledApp) => void;
+  onRestore: (app: InstalledApp) => void;
+  onUninstall: (app: InstalledApp) => void;
   isMigrated: boolean;
 }) {
   return (
@@ -137,26 +143,40 @@ function AppCard({
         </button>
 
         {isMigrated ? (
-          <span 
-            className="btn"
-            style={{ 
-              background: 'var(--color-gray-100)', 
-              color: 'var(--text-muted)',
-              cursor: 'default',
-              minWidth: '80px'
-            }}
-          >
-            <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--color-success)' }} />
-            已完成
-          </span>
+          <>
+            <button
+              onClick={() => onRestore(app)}
+              className="btn btn-secondary"
+              style={{ minWidth: '80px' }}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5" style={{ color: 'var(--color-success)' }} />
+              还原
+            </button>
+            <button
+              onClick={() => onUninstall(app)}
+              className="btn btn-secondary"
+              style={{ minWidth: '96px' }}
+            >
+              强力卸载
+            </button>
+          </>
         ) : (
-          <button
-            onClick={() => onMigrate(app)}
-            className="btn btn-primary"
-            style={{ minWidth: '80px' }}
-          >
-            迁移
-          </button>
+          <>
+            <button
+              onClick={() => onMigrate(app)}
+              className="btn btn-primary"
+              style={{ minWidth: '80px' }}
+            >
+              迁移
+            </button>
+            <button
+              onClick={() => onUninstall(app)}
+              className="btn btn-secondary"
+              style={{ minWidth: '96px' }}
+            >
+              强力卸载
+            </button>
+          </>
         )}
       </div>
     </div>
@@ -185,7 +205,7 @@ function LoadingSkeleton() {
   );
 }
 
-export default function AppList({ apps, loading, onMigrate, migratedPaths = [] }: AppListProps) {
+export default function AppList({ apps, loading, onMigrate, onRestore, onUninstall, migratedPaths = [] }: AppListProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
   // 检查应用是否已迁移
@@ -271,6 +291,8 @@ export default function AppList({ apps, loading, onMigrate, migratedPaths = [] }
                 key={`${app.display_name}-${index}`} 
                 app={app} 
                 onMigrate={onMigrate}
+                onRestore={onRestore}
+                onUninstall={onUninstall}
                 isMigrated={isAppMigrated(app)}
               />
             ))}

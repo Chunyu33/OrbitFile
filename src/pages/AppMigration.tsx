@@ -9,7 +9,7 @@ import DiskUsageBar from '../components/DiskUsageBar';
 import AppList from '../components/AppList';
 import MigrationModal from '../components/MigrationModal';
 import Toast, { useToast } from '../components/Toast';
-import { DiskUsage, InstalledApp, MigrationResult, MigrationStep, ProcessLockResult } from '../types';
+import { DiskUsage, InstalledApp, MigrationRecord, MigrationResult, MigrationStep, ProcessLockResult, UninstallResult } from '../types';
 
 export default function AppMigration() {
   const [disks, setDisks] = useState<DiskUsage[]>([]);
@@ -20,6 +20,8 @@ export default function AppMigration() {
   
   // 已迁移的路径列表
   const [migratedPaths, setMigratedPaths] = useState<string[]>([]);
+  // 应用迁移记录（用于还原时获取 historyId）
+  const [appMigrationRecords, setAppMigrationRecords] = useState<MigrationRecord[]>([]);
 
   // 迁移状态
   const [migrationModalOpen, setMigrationModalOpen] = useState(false);
@@ -57,20 +59,71 @@ export default function AppMigration() {
     }
   }
 
-  // 获取已迁移的路径列表
-  async function fetchMigratedPaths() {
+  // 获取应用迁移记录，并同步已迁移路径
+  async function fetchAppMigrationRecords() {
     try {
-      const paths = await invoke<string[]>('get_migrated_paths');
-      setMigratedPaths(paths);
+      const records = await invoke<MigrationRecord[]>('get_migration_history');
+      const appRecords = records.filter(record => record.record_type === 'App');
+      setAppMigrationRecords(appRecords);
+      setMigratedPaths(appRecords.map(record => record.original_path));
     } catch (error) {
-      console.error('获取已迁移路径失败:', error);
+      console.error('获取应用迁移记录失败:', error);
+      setAppMigrationRecords([]);
+      setMigratedPaths([]);
     }
   }
 
   async function handleRefresh() {
     setRefreshing(true);
-    await Promise.all([fetchDiskUsage(), fetchInstalledApps(), fetchMigratedPaths()]);
+    await Promise.all([fetchDiskUsage(), fetchInstalledApps(), fetchAppMigrationRecords()]);
     setRefreshing(false);
+  }
+
+  // 还原流程：将已迁移应用恢复到原始位置
+  async function handleRestore(app: InstalledApp) {
+    const record = appMigrationRecords.find(r =>
+      r.original_path.toLowerCase() === app.install_location.toLowerCase()
+    );
+
+    if (!record) {
+      showToast('未找到该应用的迁移记录，无法执行还原', 'error');
+      return;
+    }
+
+    try {
+      const result = await invoke<MigrationResult>('restore_app', {
+        historyId: record.id,
+      });
+
+      if (result.success) {
+        showToast(`${app.display_name} 已成功还原`, 'success');
+        await handleRefresh();
+      } else {
+        showToast(result.message || '还原失败', 'error');
+      }
+    } catch (error) {
+      showToast(`还原失败: ${error}`, 'error');
+    }
+  }
+
+  // 强力卸载流程
+  async function handleUninstall(app: InstalledApp) {
+    try {
+      const result = await invoke<UninstallResult>('uninstall_application', {
+        input: {
+          app_id: app.display_name,
+          registry_path: app.registry_path,
+        },
+      });
+
+      if (result.success) {
+        showToast(`已启动 ${app.display_name} 的卸载程序`, 'success');
+      } else {
+        showToast(result.message || '启动卸载失败', 'error');
+      }
+    } catch (error) {
+      showToast(`启动卸载失败: ${error}`, 'error');
+    }
   }
 
   // 核心迁移流程
@@ -149,7 +202,7 @@ export default function AppMigration() {
   useEffect(() => {
     fetchDiskUsage();
     fetchInstalledApps();
-    fetchMigratedPaths();
+    fetchAppMigrationRecords();
   }, []);
 
   return (
@@ -177,6 +230,8 @@ export default function AppMigration() {
             apps={apps} 
             loading={appsLoading} 
             onMigrate={handleMigrate}
+            onRestore={handleRestore}
+            onUninstall={handleUninstall}
             migratedPaths={migratedPaths}
           />
         </section>

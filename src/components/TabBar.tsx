@@ -12,7 +12,7 @@ interface TabBarProps {
 
 // Tab 配置
 const tabs: { id: TabType; label: string; Icon: typeof FolderSync }[] = [
-  { id: 'migration', label: '应用迁移', Icon: FolderSync },
+  { id: 'migration', label: '应用管理', Icon: FolderSync },
   { id: 'folders', label: '大文件目录', Icon: FolderArchive },
   { id: 'history', label: '迁移历史', Icon: History },
   { id: 'settings', label: '设置', Icon: Settings },

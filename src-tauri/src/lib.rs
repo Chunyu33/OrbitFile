@@ -1,8 +1,10 @@
 // OrbitFile - 专业的 Windows 存储重定向工具
 // 后端 Rust 模块，提供系统扫描、磁盘信息、应用迁移和历史记录功能
 
+mod app_manager;
+
 use serde::{Deserialize, Serialize};
-use sysinfo::{Disks, System};
+use sysinfo::Disks;
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::io::{Read, Write, Cursor};
@@ -14,11 +16,7 @@ use std::sync::Mutex;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
 
-// 仅在 Windows 平台编译 winreg 和 symlink 相关代码
-#[cfg(windows)]
-use winreg::enums::*;
-#[cfg(windows)]
-use winreg::RegKey;
+// 仅在 Windows 平台编译 symlink 相关代码
 #[cfg(windows)]
 use std::os::windows::fs::symlink_dir;
 
@@ -61,6 +59,8 @@ pub struct InstalledApp {
     /// 应用图标的 Base64 编码数据（PNG 格式）
     /// 如果提取失败则为空字符串
     pub icon_base64: String,
+    /// 应用对应注册表路径（用于后续卸载）
+    pub registry_path: String,
 }
 
 /// 从 EXE/DLL 文件中提取图标并转换为 Base64 编码的 PNG
@@ -80,7 +80,7 @@ pub struct InstalledApp {
 /// - 成功时返回 Base64 编码的 PNG 图标数据
 /// - 失败时返回空字符串
 #[cfg(windows)]
-fn extract_icon_to_base64(icon_path: &str) -> String {
+pub(crate) fn extract_icon_to_base64(icon_path: &str) -> String {
     // 检查缓存，避免重复提取
     if let Ok(cache) = ICON_CACHE.lock() {
         if let Some(cached) = cache.get(icon_path) {
@@ -903,79 +903,7 @@ fn restore_large_folder(junction_path: String) -> Result<MigrationResult, String
 /// 扫描 Windows 注册表中的 Uninstall 键，提取应用信息
 #[tauri::command]
 fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
-    #[cfg(windows)]
-    {
-        let mut apps: Vec<InstalledApp> = Vec::new();
-        
-        // 定义需要扫描的注册表路径
-        // 包括 64 位和 32 位应用的注册表位置
-        let registry_paths = [
-            (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
-            (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
-            (HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
-        ];
-
-        for (hkey, path) in registry_paths.iter() {
-            // 尝试打开注册表键
-            if let Ok(uninstall_key) = RegKey::predef(*hkey).open_subkey(path) {
-                // 遍历所有子键（每个子键代表一个已安装的应用）
-                for subkey_name in uninstall_key.enum_keys().filter_map(|k| k.ok()) {
-                    if let Ok(subkey) = uninstall_key.open_subkey(&subkey_name) {
-                        // 读取应用显示名称，跳过没有名称的条目
-                        let display_name: String = subkey.get_value("DisplayName").unwrap_or_default();
-                        if display_name.is_empty() {
-                            continue;
-                        }
-
-                        // 读取安装位置
-                        // 注意：某些注册表条目的路径可能带有引号，需要去除
-                        let raw_location: String = subkey.get_value("InstallLocation").unwrap_or_default();
-                        let install_location = raw_location.trim().trim_matches('"').to_string();
-                        
-                        // 读取应用图标路径
-                        let display_icon: String = subkey.get_value("DisplayIcon").unwrap_or_default();
-                        
-                        // 读取预估大小（注册表中以 KB 为单位存储）
-                        let estimated_size: u64 = subkey.get_value::<u32, _>("EstimatedSize")
-                            .unwrap_or(0) as u64;
-
-                        // 只添加有安装位置的应用（便于后续迁移）
-                        if !install_location.is_empty() {
-                            // 检查是否已存在相同名称的应用（避免重复）
-                            if !apps.iter().any(|app| app.display_name == display_name) {
-                                apps.push(InstalledApp {
-                                    display_name,
-                                    install_location,
-                                    display_icon,
-                                    estimated_size,
-                                    icon_base64: String::new(), // 先设为空，稍后批量提取
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 按应用名称排序
-        apps.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
-        
-        // 为每个应用提取图标（使用缓存避免重复提取）
-        // 注意：图标提取可能较慢，但缓存机制可以加速后续加载
-        for app in apps.iter_mut() {
-            if !app.display_icon.is_empty() {
-                app.icon_base64 = extract_icon_to_base64(&app.display_icon);
-            }
-        }
-        
-        Ok(apps)
-    }
-
-    #[cfg(not(windows))]
-    {
-        // 非 Windows 平台返回空列表
-        Ok(Vec::new())
-    }
+    app_manager::scanner::get_installed_apps()
 }
 
 /// 获取所有磁盘使用情况
@@ -1085,64 +1013,9 @@ pub struct ProcessLockResult {
 /// - `ProcessLockResult`: 包含是否被锁定及占用进程列表
 #[tauri::command]
 fn check_process_locks(source_path: String) -> Result<ProcessLockResult, String> {
-    let source = Path::new(&source_path);
-    
-    // 检查路径是否存在
-    if !source.exists() {
-        return Err(format!("源路径不存在: {}", source_path));
-    }
-
-    let mut sys = System::new_all();
-    sys.refresh_all();
-
-    let mut locked_processes: Vec<String> = Vec::new();
-    let source_lower = source_path.to_lowercase();
-
-    // 遍历所有进程，检查其可执行文件路径是否在源目录下
-    // 注意：sysinfo 无法直接获取进程打开的所有文件句柄
-    // 这里采用简化方案：检查进程的可执行文件是否位于源目录
-    for (_, process) in sys.processes() {
-        if let Some(exe_path) = process.exe() {
-            let exe_str = exe_path.to_string_lossy().to_lowercase();
-            if exe_str.starts_with(&source_lower) {
-                let name = process.name().to_string_lossy().to_string();
-                if !locked_processes.contains(&name) {
-                    locked_processes.push(name);
-                }
-            }
-        }
-    }
-
-    Ok(ProcessLockResult {
-        is_locked: !locked_processes.is_empty(),
-        processes: locked_processes,
-    })
+    app_manager::scanner::check_process_locks(source_path)
 }
 
-/// 获取指定磁盘的可用空间
-/// 
-/// # 参数
-/// - `path`: 目标路径（用于确定所在磁盘）
-/// 
-/// # 返回
-/// - 可用空间（字节）
-fn get_available_space(path: &Path) -> u64 {
-    let disks = Disks::new_with_refreshed_list();
-    
-    // 获取路径的盘符（如 "D:"）
-    let path_str = path.to_string_lossy().to_uppercase();
-    
-    for disk in disks.list() {
-        let mount = disk.mount_point().to_string_lossy().to_uppercase();
-        if path_str.starts_with(&mount) || path_str.starts_with(&mount.replace("\\", "")) {
-            return disk.available_space();
-        }
-    }
-    
-    0
-}
-
-/// 核心迁移命令
 /// 将应用从源路径迁移到目标路径，并创建 Windows 目录联接（Junction）
 /// 
 /// # 迁移流程详解
@@ -1167,201 +1040,14 @@ fn get_available_space(path: &Path) -> u64 {
 /// - `MigrationResult`: 迁移结果，包含成功状态和新路径
 #[tauri::command]
 fn migrate_app(app_name: String, source: String, target_parent: String) -> Result<MigrationResult, String> {
-    #[cfg(windows)]
-    {
-        let source_path = Path::new(&source);
-        let target_parent_path = Path::new(&target_parent);
+    app_manager::migration::migrate_app(app_name, source, target_parent)
+}
 
-        // ========== 步骤 0: 基础验证 ==========
-        
-        // 检查源路径是否存在
-        if !source_path.exists() {
-            return Ok(MigrationResult {
-                success: false,
-                message: format!("源路径不存在: {}", source),
-                new_path: None,
-            });
-        }
-
-        // 检查源路径是否为目录
-        if !source_path.is_dir() {
-            return Ok(MigrationResult {
-                success: false,
-                message: "源路径必须是一个目录".to_string(),
-                new_path: None,
-            });
-        }
-
-        // 检查目标父目录是否存在
-        if !target_parent_path.exists() {
-            return Ok(MigrationResult {
-                success: false,
-                message: format!("目标路径不存在: {}", target_parent),
-                new_path: None,
-            });
-        }
-
-        // 获取源文件夹名称
-        let folder_name = source_path
-            .file_name()
-            .ok_or("无法获取源文件夹名称")?
-            .to_string_lossy()
-            .to_string();
-
-        // 构建目标完整路径
-        let target_path = target_parent_path.join(&folder_name);
-        let target_path_str = target_path.to_string_lossy().to_string();
-
-        // 检查目标路径是否已存在
-        if target_path.exists() {
-            return Ok(MigrationResult {
-                success: false,
-                message: format!("目标路径已存在: {}", target_path_str),
-                new_path: None,
-            });
-        }
-
-        // ========== 步骤 1: 空间检查 ==========
-        
-        // 计算源文件夹大小
-        let source_size = get_size(&source_path).map_err(|e| format!("无法计算源文件夹大小: {}", e))?;
-        
-        // 获取目标磁盘可用空间
-        let available_space = get_available_space(&target_parent_path);
-        
-        // 预留 10% 额外空间作为安全边际
-        let required_space = (source_size as f64 * 1.1) as u64;
-        
-        if available_space < required_space {
-            return Ok(MigrationResult {
-                success: false,
-                message: format!(
-                    "目标磁盘空间不足。需要: {:.2} GB，可用: {:.2} GB",
-                    required_space as f64 / 1024.0 / 1024.0 / 1024.0,
-                    available_space as f64 / 1024.0 / 1024.0 / 1024.0
-                ),
-                new_path: None,
-            });
-        }
-
-        // ========== 步骤 2: 复制文件 ==========
-        
-        // 配置复制选项
-        let mut options = CopyOptions::new();
-        options.overwrite = false;  // 不覆盖已存在的文件
-        options.copy_inside = true; // 复制目录内容而非目录本身
-        
-        // 执行递归复制
-        // fs_extra::dir::copy 会将 source 目录复制到 target_parent 下
-        copy(&source_path, &target_parent_path, &options)
-            .map_err(|e| format!("复制文件失败: {}", e))?;
-
-        // ========== 步骤 3: 完整性校验 ==========
-        
-        // 计算目标文件夹大小
-        let target_size = get_size(&target_path).map_err(|e| format!("无法计算目标文件夹大小: {}", e))?;
-        
-        // 允许 1% 的误差（文件系统元数据可能略有差异）
-        let size_diff = (source_size as i64 - target_size as i64).abs();
-        let tolerance = (source_size as f64 * 0.01) as i64;
-        
-        if size_diff > tolerance {
-            // 校验失败，删除已复制的目标文件夹
-            let _ = fs::remove_dir_all(&target_path);
-            return Ok(MigrationResult {
-                success: false,
-                message: format!(
-                    "文件完整性校验失败。源大小: {} 字节，目标大小: {} 字节",
-                    source_size, target_size
-                ),
-                new_path: None,
-            });
-        }
-
-        // ========== 步骤 4: 备份原目录 ==========
-        
-        let backup_path = source_path.with_file_name(format!("{}_orbitfile_backup", folder_name));
-        let backup_path_str = backup_path.to_string_lossy().to_string();
-        
-        // 重命名原目录为备份
-        fs::rename(&source_path, &backup_path).map_err(|e| {
-            // 重命名失败，清理目标文件夹
-            let _ = fs::remove_dir_all(&target_path);
-            format!("无法备份原目录: {}。请确保没有程序正在使用该目录。", e)
-        })?;
-
-        // ========== 步骤 5: 创建 Junction（目录联接） ==========
-        // 
-        // Junction 是 Windows NTFS 文件系统的特性，类似于 Unix 的符号链接
-        // 它允许一个目录路径指向另一个目录的实际位置
-        // 对于应用程序来说，访问原路径和访问新路径是完全透明的
-        // 
-        // 使用 std::os::windows::fs::symlink_dir 创建目录符号链接
-        // 注意：在 Windows 上创建符号链接可能需要管理员权限或开发者模式
-        
-        match symlink_dir(&target_path, &source_path) {
-            Ok(_) => {
-                // Junction 创建成功
-                
-                // ========== 步骤 6: 清理备份 ==========
-                // 迁移完全成功，可以安全删除备份目录
-                if let Err(e) = fs::remove_dir_all(&backup_path) {
-                    // 删除备份失败不影响迁移结果，只记录警告
-                    eprintln!("警告: 无法删除备份目录 {}: {}", backup_path_str, e);
-                }
-
-                // ========== 步骤 7: 保存迁移记录 ==========
-                // 将迁移信息持久化到 JSON 文件，用于历史查看和恢复
-                if let Err(e) = add_migration_record(&app_name, &source, &target_path_str, source_size, MigrationRecordType::App) {
-                    eprintln!("警告: 保存迁移记录失败: {}", e);
-                }
-
-                Ok(MigrationResult {
-                    success: true,
-                    message: format!("迁移成功！应用已从 {} 迁移到 {}", source, target_path_str),
-                    new_path: Some(target_path_str),
-                })
-            }
-            Err(e) => {
-                // ========== 回滚机制 ==========
-                // Junction 创建失败，需要恢复原状态
-                
-                // 尝试恢复原目录
-                if let Err(restore_err) = fs::rename(&backup_path, &source_path) {
-                    // 恢复也失败了，这是严重错误
-                    return Ok(MigrationResult {
-                        success: false,
-                        message: format!(
-                            "严重错误: 创建链接失败 ({})，且无法恢复原目录 ({})。\n备份位置: {}\n目标位置: {}",
-                            e, restore_err, backup_path_str, target_path_str
-                        ),
-                        new_path: None,
-                    });
-                }
-
-                // 删除已复制的目标文件夹
-                let _ = fs::remove_dir_all(&target_path);
-
-                Ok(MigrationResult {
-                    success: false,
-                    message: format!(
-                        "创建目录链接失败: {}。\n可能原因: 需要管理员权限或启用开发者模式。\n已自动恢复原目录。",
-                        e
-                    ),
-                    new_path: None,
-                })
-            }
-        }
-    }
-
-    #[cfg(not(windows))]
-    {
-        Ok(MigrationResult {
-            success: false,
-            message: "迁移功能仅支持 Windows 系统".to_string(),
-            new_path: None,
-        })
-    }
+/// 启动应用卸载流程
+/// 支持按 app_id 或 registry_path 触发卸载
+#[tauri::command]
+fn uninstall_application(input: app_manager::uninstaller::UninstallInput) -> Result<app_manager::uninstaller::UninstallResult, String> {
+    app_manager::uninstaller::uninstall_application(input)
 }
 
 // ============================================================================
@@ -1497,7 +1183,7 @@ fn save_history(storage: &HistoryStorage) -> Result<(), String> {
 /// 添加迁移记录
 /// 在迁移成功后调用，记录迁移信息
 /// record_type: 记录类型，App 或 LargeFolder
-fn add_migration_record(
+pub(crate) fn add_migration_record(
     app_name: &str,
     original_path: &str,
     target_path: &str,
@@ -1934,6 +1620,7 @@ pub fn run() {
             get_disk_usage,
             check_process_locks,
             migrate_app,
+            uninstall_application,
             get_migration_history,
             get_migrated_paths,
             restore_app,
