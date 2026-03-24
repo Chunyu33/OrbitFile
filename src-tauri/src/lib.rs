@@ -61,6 +61,8 @@ pub struct InstalledApp {
     pub icon_base64: String,
     /// 应用对应注册表路径（用于后续卸载）
     pub registry_path: String,
+    /// 发布商（用于强力卸载残留匹配）
+    pub publisher: String,
 }
 
 /// 从 EXE/DLL 文件中提取图标并转换为 Base64 编码的 PNG
@@ -1046,8 +1048,28 @@ fn migrate_app(app_name: String, source: String, target_parent: String) -> Resul
 /// 启动应用卸载流程
 /// 支持按 app_id 或 registry_path 触发卸载
 #[tauri::command]
-fn uninstall_application(input: app_manager::uninstaller::UninstallInput) -> Result<app_manager::uninstaller::UninstallResult, String> {
-    app_manager::uninstaller::uninstall_application(input)
+async fn uninstall_application(input: app_manager::uninstaller::UninstallInput) -> Result<app_manager::uninstaller::UninstallResult, String> {
+    app_manager::uninstaller::uninstall_application(input).await
+}
+
+/// 独立扫描应用残留
+#[tauri::command]
+fn scan_app_residue(
+    app_name: String,
+    publisher: Option<String>,
+    install_location: Option<String>,
+) -> Result<Vec<app_manager::uninstaller::LeftoverItem>, String> {
+    app_manager::uninstaller::scan_app_residue(app_name, publisher, install_location)
+}
+
+/// 清理用户确认的残留路径/注册表项
+#[tauri::command]
+fn execute_cleanup(
+    items: Vec<String>,
+    app_name: Option<String>,
+    publisher: Option<String>,
+) -> Result<app_manager::uninstaller::CleanupResult, String> {
+    app_manager::uninstaller::execute_cleanup(items, app_name, publisher)
 }
 
 // ============================================================================
@@ -1621,6 +1643,8 @@ pub fn run() {
             check_process_locks,
             migrate_app,
             uninstall_application,
+            scan_app_residue,
+            execute_cleanup,
             get_migration_history,
             get_migrated_paths,
             restore_app,

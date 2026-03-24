@@ -103,7 +103,7 @@ export default function MigrationModal({
 
   return (
     // 全屏遮罩层 - 使用 grid 实现完美居中
-    <div className="fixed inset-0 z-50 grid place-items-center p-4 sm:p-8">
+    <div className="fixed inset-0 z-50 grid place-items-center p-6 md:p-10">
       {/* 背景遮罩 - 双层叠加实现自然毛玻璃效果 */}
       <div 
         className="absolute inset-0 bg-black/40 backdrop-blur-[12px]"
@@ -113,13 +113,17 @@ export default function MigrationModal({
 
       {/* 弹窗主体 - 使用 CSS 变量支持深色模式 */}
       <div 
-        style={{ padding: '10px', background: 'var(--bg-modal)' }} 
+        style={{
+          width: 'min(520px, calc(100vw - 48px))',
+          background: 'var(--bg-modal)',
+          border: '1px solid var(--border-color)',
+        }} 
         className="relative w-full max-w-[520px] overflow-hidden rounded-2xl shadow-2xl animate-modal-in"
       >
         
         {/* 一级层：标题栏 */}
         <div 
-          className="flex items-center justify-between px-8 py-5"
+          className="flex items-center justify-between px-8 pt-5 pb-5"
           style={{ borderBottom: '1px solid var(--border-color)' }}
         >
           <div className="flex items-center gap-3">
@@ -144,7 +148,7 @@ export default function MigrationModal({
         </div>
 
         {/* 二级层：核心内容区 */}
-        <div style={{ padding: '10px 0 10px 0' }} className="px-5 py-10">
+        <div className="px-5 pt-10 pb-10">
           {/* 应用名称区：视觉焦点 */}
           <div className="mb-8 text-center">
             <p className="mb-2 text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
@@ -239,11 +243,10 @@ export default function MigrationModal({
         {canClose && (
           <div 
             style={{ 
-              padding: '10px 0 2px 0', 
               borderTop: '1px solid var(--border-color)',
               background: 'var(--color-gray-50)'
             }} 
-            className="flex items-center justify-center gap-3 px-8 py-5"
+            className="flex items-center justify-center gap-3 px-8 pt-5 pb-5"
           >
             <button
               onClick={onClose}

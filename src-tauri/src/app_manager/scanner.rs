@@ -57,6 +57,9 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
                         // 读取应用图标路径
                         let display_icon: String = subkey.get_value("DisplayIcon").unwrap_or_default();
 
+                        // 读取发布商（用于强力卸载残留匹配）
+                        let publisher: String = subkey.get_value("Publisher").unwrap_or_default();
+
                         // 读取预估大小（KB）
                         let estimated_size: u64 = subkey.get_value::<u32, _>("EstimatedSize").unwrap_or(0) as u64;
 
@@ -83,6 +86,7 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
                             estimated_size,
                             icon_base64: String::new(),
                             registry_path: app_registry_path,
+                            publisher,
                         });
                     }
                 }

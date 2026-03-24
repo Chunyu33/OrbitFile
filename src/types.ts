@@ -18,6 +18,23 @@ export interface InstalledApp {
   icon_base64: string;
   // 应用对应注册表路径（用于强力卸载）
   registry_path: string;
+  // 发布商（用于强力卸载残留匹配）
+  publisher: string;
+}
+
+/**
+ * 强力卸载残留项
+ * 对应 Rust 后端的 LeftoverItem 结构体
+ */
+export interface LeftoverItem {
+  // 路径（文件、目录或注册表路径）
+  path: string;
+  // 项目类型：Folder / File / Registry
+  item_type: string;
+  // 大小（MB）
+  size_mb: number;
+  // 是否默认选中
+  selected: boolean;
 }
 
 /**
@@ -25,12 +42,29 @@ export interface InstalledApp {
  * 对应 Rust 后端的 UninstallResult 结构体
  */
 export interface UninstallResult {
-  // 是否成功启动卸载器
+  // 是否成功执行卸载流程
   success: boolean;
   // 返回消息
   message: string;
   // 实际执行的卸载命令
   command: string | null;
+  // 扫描出的残留项目
+  leftovers: LeftoverItem[];
+}
+
+/**
+ * 清理结果接口
+ * 对应 Rust 后端的 CleanupResult 结构体
+ */
+export interface CleanupResult {
+  // 是否全部成功
+  success: boolean;
+  // 返回消息
+  message: string;
+  // 成功清理数量
+  cleaned_count: number;
+  // 清理失败项
+  failed_items: string[];
 }
 
 /**

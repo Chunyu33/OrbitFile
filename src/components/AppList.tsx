@@ -11,6 +11,7 @@ interface AppListProps {
   onMigrate: (app: InstalledApp) => void;
   onRestore: (app: InstalledApp) => void;
   onUninstall: (app: InstalledApp) => void;
+  uninstallingKey?: string | null;
   migratedPaths?: string[];
 }
 
@@ -83,12 +84,14 @@ function AppCard({
   onMigrate, 
   onRestore,
   onUninstall,
+  isUninstalling,
   isMigrated 
 }: { 
   app: InstalledApp; 
   onMigrate: (app: InstalledApp) => void;
   onRestore: (app: InstalledApp) => void;
   onUninstall: (app: InstalledApp) => void;
+  isUninstalling: boolean;
   isMigrated: boolean;
 }) {
   return (
@@ -155,9 +158,10 @@ function AppCard({
             <button
               onClick={() => onUninstall(app)}
               className="btn btn-secondary"
+              disabled={isUninstalling}
               style={{ minWidth: '96px' }}
             >
-              强力卸载
+              {isUninstalling ? 'Uninstalling...' : '强力卸载'}
             </button>
           </>
         ) : (
@@ -172,9 +176,10 @@ function AppCard({
             <button
               onClick={() => onUninstall(app)}
               className="btn btn-secondary"
+              disabled={isUninstalling}
               style={{ minWidth: '96px' }}
             >
-              强力卸载
+              {isUninstalling ? 'Uninstalling...' : '强力卸载'}
             </button>
           </>
         )}
@@ -205,7 +210,7 @@ function LoadingSkeleton() {
   );
 }
 
-export default function AppList({ apps, loading, onMigrate, onRestore, onUninstall, migratedPaths = [] }: AppListProps) {
+export default function AppList({ apps, loading, onMigrate, onRestore, onUninstall, uninstallingKey = null, migratedPaths = [] }: AppListProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
   // 检查应用是否已迁移
@@ -293,6 +298,7 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
                 onMigrate={onMigrate}
                 onRestore={onRestore}
                 onUninstall={onUninstall}
+                isUninstalling={uninstallingKey === `${app.display_name}|${app.registry_path}`}
                 isMigrated={isAppMigrated(app)}
               />
             ))}

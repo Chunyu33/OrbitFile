@@ -3,13 +3,14 @@
 
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-dialog';
+import { confirm, open } from '@tauri-apps/plugin-dialog';
 import { RefreshCw } from 'lucide-react';
 import DiskUsageBar from '../components/DiskUsageBar';
 import AppList from '../components/AppList';
 import MigrationModal from '../components/MigrationModal';
+import CleanupModal from '../components/CleanupModal';
 import Toast, { useToast } from '../components/Toast';
-import { DiskUsage, InstalledApp, MigrationRecord, MigrationResult, MigrationStep, ProcessLockResult, UninstallResult } from '../types';
+import { CleanupResult, DiskUsage, InstalledApp, LeftoverItem, MigrationRecord, MigrationResult, MigrationStep, ProcessLockResult, UninstallResult } from '../types';
 
 export default function AppMigration() {
   const [disks, setDisks] = useState<DiskUsage[]>([]);
@@ -29,6 +30,14 @@ export default function AppMigration() {
   const [migratingApp, setMigratingApp] = useState<InstalledApp | null>(null);
   const [migrationMessage, setMigrationMessage] = useState('');
   const [lockedProcesses, setLockedProcesses] = useState<string[]>([]);
+
+  // 强力卸载状态
+  const [uninstallingKey, setUninstallingKey] = useState<string | null>(null);
+  const [cleanupModalOpen, setCleanupModalOpen] = useState(false);
+  const [cleanupTargetAppName, setCleanupTargetAppName] = useState('');
+  const [cleanupTargetPublisher, setCleanupTargetPublisher] = useState<string | null>(null);
+  const [leftoverItems, setLeftoverItems] = useState<LeftoverItem[]>([]);
+  const [cleanupLoading, setCleanupLoading] = useState(false);
   
   // Toast 通知
   const { toast, showToast, hideToast } = useToast();
@@ -43,6 +52,29 @@ export default function AppMigration() {
       setDisks([]);
     } finally {
       setDiskLoading(false);
+    }
+  }
+
+  // 手动触发残留扫描
+  async function handleScanResidue(app: InstalledApp) {
+    try {
+      const leftovers = await invoke<LeftoverItem[]>('scan_app_residue', {
+        appName: app.display_name,
+        publisher: app.publisher || null,
+        installLocation: app.install_location || null,
+      });
+
+      if (leftovers.length > 0) {
+        setCleanupTargetAppName(app.display_name);
+        setCleanupTargetPublisher(app.publisher || null);
+        setLeftoverItems(leftovers);
+        setCleanupModalOpen(true);
+      } else {
+        showToast(`${app.display_name} 未检测到残留`, 'success');
+        await handleRefresh();
+      }
+    } catch (error) {
+      showToast(`残留扫描失败: ${error}`, 'error');
     }
   }
 
@@ -108,7 +140,25 @@ export default function AppMigration() {
 
   // 强力卸载流程
   async function handleUninstall(app: InstalledApp) {
+    const confirmed = await confirm(
+      `即将启动 ${app.display_name} 的卸载程序。\n\n此操作可能删除应用及其相关组件，是否继续？`,
+      {
+        title: '确认强力卸载',
+        kind: 'warning',
+        okLabel: '继续卸载',
+        cancelLabel: '取消',
+      }
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    const currentUninstallKey = `${app.display_name}|${app.registry_path}`;
+
     try {
+      setUninstallingKey(currentUninstallKey);
+
       const result = await invoke<UninstallResult>('uninstall_application', {
         input: {
           app_id: app.display_name,
@@ -117,13 +167,91 @@ export default function AppMigration() {
       });
 
       if (result.success) {
-        showToast(`已启动 ${app.display_name} 的卸载程序`, 'success');
+        showToast(result.message || `${app.display_name} 卸载流程已完成`, 'success');
+
+        const confirmScan = await confirm(
+          `${app.display_name} 卸载流程已结束。\n\n是否现在开始残留扫描？（建议在卸载向导完全关闭后执行）`,
+          {
+            title: '手动确认残留扫描',
+            kind: 'warning',
+            okLabel: '开始扫描',
+            cancelLabel: '稍后再说',
+          }
+        );
+
+        if (confirmScan) {
+          await handleScanResidue(app);
+        } else {
+          await handleRefresh();
+        }
       } else {
         showToast(result.message || '启动卸载失败', 'error');
       }
     } catch (error) {
-      showToast(`启动卸载失败: ${error}`, 'error');
+      showToast(`卸载未完成：${error}`, 'error');
+    } finally {
+      setUninstallingKey(null);
     }
+  }
+
+  // 切换残留项选中状态
+  function handleToggleLeftover(path: string) {
+    setLeftoverItems((prev) =>
+      prev.map((item) =>
+        item.path === path
+          ? { ...item, selected: !item.selected }
+          : item
+      )
+    );
+  }
+
+  // 执行清理
+  async function handleConfirmCleanup() {
+    const selectedPaths = leftoverItems
+      .filter((item) => item.selected)
+      .map((item) => item.path);
+
+    if (selectedPaths.length === 0) {
+      showToast('请至少选择一项残留再进行清理', 'error');
+      return;
+    }
+
+    try {
+      setCleanupLoading(true);
+      const result = await invoke<CleanupResult>('execute_cleanup', {
+        items: selectedPaths,
+        appName: cleanupTargetAppName || null,
+        publisher: cleanupTargetPublisher,
+      });
+
+      if (result.success) {
+        showToast('清理成功', 'success');
+      } else {
+        showToast(result.message || '部分项目清理失败，请重试', 'error');
+      }
+
+      setCleanupModalOpen(false);
+      setLeftoverItems([]);
+      setCleanupTargetAppName('');
+      setCleanupTargetPublisher(null);
+      await handleRefresh();
+    } catch (error) {
+      showToast(`执行清理失败: ${error}`, 'error');
+    } finally {
+      setCleanupLoading(false);
+    }
+  }
+
+  // 关闭清理弹窗
+  function handleCloseCleanupModal() {
+    if (cleanupLoading) {
+      return;
+    }
+
+    setCleanupModalOpen(false);
+    setLeftoverItems([]);
+    setCleanupTargetAppName('');
+    setCleanupTargetPublisher(null);
   }
 
   // 核心迁移流程
@@ -232,6 +360,7 @@ export default function AppMigration() {
             onMigrate={handleMigrate}
             onRestore={handleRestore}
             onUninstall={handleUninstall}
+            uninstallingKey={uninstallingKey}
             migratedPaths={migratedPaths}
           />
         </section>
@@ -245,6 +374,17 @@ export default function AppMigration() {
         message={migrationMessage}
         lockedProcesses={lockedProcesses}
         onClose={handleCloseMigrationModal}
+      />
+
+      {/* 强力卸载残留清理弹窗 */}
+      <CleanupModal
+        isOpen={cleanupModalOpen}
+        appName={cleanupTargetAppName}
+        items={leftoverItems}
+        loading={cleanupLoading}
+        onClose={handleCloseCleanupModal}
+        onToggleItem={handleToggleLeftover}
+        onConfirm={handleConfirmCleanup}
       />
 
       {/* Toast 通知 */}

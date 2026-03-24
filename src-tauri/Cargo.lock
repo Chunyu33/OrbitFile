@@ -2796,6 +2796,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
+ "walkdir",
  "windows 0.58.0",
  "winreg 0.52.0",
 ]

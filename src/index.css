@@ -8,8 +8,11 @@
 /* 全局样式重置 */
 *, *::before, *::after {
   box-sizing: border-box;
+}
+
+html,
+body {
   margin: 0;
-  padding: 0;
 }
 
 html, body, #root {

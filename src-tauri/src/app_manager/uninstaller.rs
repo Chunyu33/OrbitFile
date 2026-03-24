@@ -1,8 +1,14 @@
 // 应用卸载模块
-// 负责从注册表读取卸载命令并启动卸载进程
+// 负责执行卸载流程、扫描残留项、执行清理
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(windows)]
+use std::collections::HashSet;
+#[cfg(windows)]
+use std::fs;
+#[cfg(windows)]
+use std::path::{Path, PathBuf};
 #[cfg(windows)]
 use std::process::Command;
 #[cfg(windows)]
@@ -10,13 +16,14 @@ use std::thread;
 #[cfg(windows)]
 use std::time::Duration;
 #[cfg(windows)]
-use std::path::Path;
+use walkdir::WalkDir;
 #[cfg(windows)]
-use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
+use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 #[cfg(windows)]
-use winreg::RegKey;
+use winreg::{HKEY, RegKey};
+
 #[cfg(windows)]
-use winreg::HKEY;
+const BLACKLIST: &[&str] = &[r"\microsoft\", r"\windows\", r"\packages\microsoft."];
 
 /// 卸载请求参数
 /// 支持按 app_id（通常传显示名）或 registry_path 定位应用
@@ -26,27 +33,287 @@ pub struct UninstallInput {
     pub registry_path: Option<String>,
 }
 
+#[cfg(windows)]
+fn sanitize_search_text(raw: &str) -> String {
+    raw.chars()
+        .filter(|ch| !ch.is_control())
+        .collect::<String>()
+        .trim()
+        .trim_matches('"')
+        .to_string()
+}
+
+#[cfg(windows)]
+fn matches_keywords(text: &str, keywords: &[String]) -> bool {
+    keywords.iter().any(|kw| keyword_matches(text, kw))
+}
+
+#[cfg(windows)]
+fn keyword_matches(text: &str, keyword: &str) -> bool {
+    if keyword.is_empty() {
+        return false;
+    }
+
+    if keyword.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return contains_ascii_keyword_with_boundary(text, keyword);
+    }
+
+    text.contains(keyword)
+}
+
+#[cfg(windows)]
+fn contains_ascii_keyword_with_boundary(text: &str, keyword: &str) -> bool {
+    for (start, _) in text.match_indices(keyword) {
+        let end = start + keyword.len();
+
+        let before_is_word = if start == 0 {
+            false
+        } else {
+            text[..start]
+                .chars()
+                .last()
+                .map(|c| c.is_ascii_alphanumeric())
+                .unwrap_or(false)
+        };
+
+        let after_is_word = if end >= text.len() {
+            false
+        } else {
+            text[end..]
+                .chars()
+                .next()
+                .map(|c| c.is_ascii_alphanumeric())
+                .unwrap_or(false)
+        };
+
+        if !before_is_word && !after_is_word {
+            return true;
+        }
+    }
+
+    false
+}
+
+#[cfg(windows)]
+fn is_safe_registry_cleanup_target(hkey: HKEY, sub_path: &str, keywords: &[String]) -> bool {
+    let normalized = sub_path.trim().trim_matches('\\').to_lowercase();
+    if normalized.is_empty() || normalized == "software" {
+        return false;
+    }
+
+    if is_blacklisted_registry_path(hkey, &normalized) {
+        return false;
+    }
+
+    // 仅允许清理 Software 子树，避免触碰系统关键分支
+    if !normalized.starts_with("software\\") {
+        return false;
+    }
+
+    // 顶层供应商目录风险高（如 Software\Microsoft），至少要求二级路径
+    if normalized.split('\\').count() < 3 {
+        return false;
+    }
+
+    let key = match RegKey::predef(hkey).open_subkey_with_flags(sub_path, KEY_READ) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    // 空键可安全删除（常见于卸载后残留空壳）
+    if is_registry_key_empty(&key) {
+        return true;
+    }
+
+    if keywords.is_empty() {
+        return false;
+    }
+
+    registry_key_belongs_to_app(&key, &normalized, keywords)
+}
+
+#[cfg(windows)]
+fn is_registry_key_empty(key: &RegKey) -> bool {
+    key.enum_keys().next().is_none() && key.enum_values().next().is_none()
+}
+
+#[cfg(windows)]
+fn registry_key_belongs_to_app(key: &RegKey, sub_path: &str, keywords: &[String]) -> bool {
+    if matches_keywords(sub_path, keywords) {
+        return true;
+    }
+
+    let display_name: String = key.get_value("DisplayName").unwrap_or_default();
+    let publisher: String = key.get_value("Publisher").unwrap_or_default();
+    let install_location: String = key.get_value("InstallLocation").unwrap_or_default();
+    let uninstall_string: String = key.get_value("UninstallString").unwrap_or_default();
+
+    [display_name, publisher, install_location, uninstall_string]
+        .into_iter()
+        .map(|v| sanitize_search_text(&v).to_lowercase())
+        .any(|v| !v.is_empty() && matches_keywords(&v, keywords))
+}
+
+#[cfg(windows)]
+fn expand_uninstall_command_candidates(commands: Vec<String>) -> Vec<String> {
+    let mut expanded: Vec<String> = Vec::new();
+
+    for command in commands {
+        let cmd = command.trim().to_string();
+        if cmd.is_empty() {
+            continue;
+        }
+
+        push_unique_command(&mut expanded, cmd.clone());
+
+        if let Some((program, args)) = parse_program_and_args(&cmd) {
+            if !args.is_empty() {
+                continue;
+            }
+
+            let file_name = Path::new(&program)
+                .file_name()
+                .map(|v| v.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+
+            if file_name.contains("uninst") || file_name.contains("uninstall") {
+                let quoted_program = quote_program(&program);
+                for flag in ["/S", "/silent", "/verysilent", "/qn", "/quiet"] {
+                    push_unique_command(&mut expanded, format!("{} {}", quoted_program, flag));
+                }
+            }
+        }
+    }
+
+    expanded
+}
+
+#[cfg(windows)]
+fn push_unique_command(target: &mut Vec<String>, command: String) {
+    if !target.iter().any(|v| v.eq_ignore_ascii_case(&command)) {
+        target.push(command);
+    }
+}
+
+#[cfg(windows)]
+fn quote_program(program: &str) -> String {
+    let trimmed = program.trim();
+    if trimmed.starts_with('"') && trimmed.ends_with('"') {
+        return trimmed.to_string();
+    }
+
+    if trimmed.contains(' ') {
+        format!("\"{}\"", trimmed)
+    } else {
+        trimmed.to_string()
+    }
+}
+
+#[cfg(windows)]
+fn wait_until_uninstalled(input: &UninstallInput) -> bool {
+    // 给注册表和安装器足够时间完成状态落盘
+    // 一些卸载器会先拉起 GUI 子进程再退出，整体耗时可能超过几十秒
+    for _ in 0..240 {
+        if !is_application_still_installed(input) {
+            return true;
+        }
+        thread::sleep(Duration::from_millis(500));
+    }
+    false
+}
+
+#[cfg(windows)]
+fn is_application_still_installed(input: &UninstallInput) -> bool {
+    if let Some(registry_path) = input.registry_path.as_ref() {
+        if let Some((hkey, sub_path)) = parse_registry_path(registry_path) {
+            if RegKey::predef(hkey).open_subkey_with_flags(sub_path, KEY_READ).is_ok() {
+                return true;
+            }
+        }
+    }
+
+    if let Some(app_id) = input.app_id.as_ref() {
+        if find_uninstall_by_display_name(app_id).is_some() {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// 残留项结构
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LeftoverItem {
+    pub path: String,
+    pub item_type: String, // Folder | File | Registry
+    pub size_mb: f64,
+    pub selected: bool,
+}
+
 /// 卸载命令返回结果
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct UninstallResult {
     pub success: bool,
     pub message: String,
     pub command: Option<String>,
+    pub leftovers: Vec<LeftoverItem>,
 }
 
-/// 启动应用卸载程序
-/// 优先读取 QuietUninstallString，若为空再读取 UninstallString
-pub fn uninstall_application(input: UninstallInput) -> Result<UninstallResult, String> {
+/// 清理执行结果
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CleanupResult {
+    pub success: bool,
+    pub message: String,
+    pub cleaned_count: usize,
+    pub failed_items: Vec<String>,
+}
+
+/// 强力卸载入口
+/// 1) 解析并执行卸载命令（等待卸载进程退出）
+/// 2) 返回成功后由前端手动确认是否触发残留扫描
+pub async fn uninstall_application(input: UninstallInput) -> Result<UninstallResult, String> {
     #[cfg(windows)]
     {
-        let uninstall_cmd = resolve_uninstall_command(&input)?;
-        start_uninstall_process(&uninstall_cmd)?;
+        let uninstall_cmds = resolve_uninstall_commands(&input)?;
+        eprintln!("[orbit-file][uninstall] 候选卸载命令数量: {}", uninstall_cmds.len());
+        let mut executed_cmd: Option<String> = None;
+        let mut command_errors: Vec<String> = Vec::new();
 
-        Ok(UninstallResult {
-            success: true,
-            message: "已成功启动卸载程序，请按卸载向导完成后续操作。".to_string(),
-            command: Some(uninstall_cmd),
-        })
+        for uninstall_cmd in uninstall_cmds {
+            eprintln!("[orbit-file][uninstall] 尝试执行命令: {}", uninstall_cmd);
+            match start_uninstall_process(&uninstall_cmd) {
+                Ok(_) => {
+                    executed_cmd = Some(uninstall_cmd.clone());
+                    if !wait_until_uninstalled(&input) {
+                        eprintln!("[orbit-file][uninstall] 命令执行后仍检测到已安装，继续尝试下一条命令");
+                        continue;
+                    }
+
+                    return Ok(UninstallResult {
+                        success: true,
+                        message: "卸载流程已完成。请在前端手动确认后再触发残留扫描。".to_string(),
+                        command: Some(uninstall_cmd),
+                        leftovers: Vec::new(),
+                    });
+                }
+                Err(err) => {
+                    command_errors.push(format!("{} => {}", uninstall_cmd, err));
+                }
+            }
+        }
+
+        if let Some(cmd) = executed_cmd {
+            return Err(format!(
+                "卸载命令已执行但仍检测到应用存在（可能未在卸载向导中确认完成）：{}",
+                cmd
+            ));
+        }
+
+        if !command_errors.is_empty() {
+            return Err(format!("卸载命令执行失败：{}", command_errors.join(" | ")));
+        }
+
+        Err("未找到可执行的卸载命令".to_string())
     }
 
     #[cfg(not(windows))]
@@ -56,24 +323,153 @@ pub fn uninstall_application(input: UninstallInput) -> Result<UninstallResult, S
             success: false,
             message: "卸载功能仅支持 Windows 系统".to_string(),
             command: None,
+            leftovers: Vec::new(),
         })
     }
 }
 
+/// 独立残留扫描命令
+/// 供前端在需要时单独触发扫描
+pub fn scan_app_residue(
+    app_name: String,
+    publisher: Option<String>,
+    install_location: Option<String>,
+) -> Result<Vec<LeftoverItem>, String> {
+    #[cfg(windows)]
+    {
+        let mut leftovers = scan_app_residue_internal(app_name, publisher, install_location)?;
+        leftovers.sort_by(|a, b| b.size_mb.partial_cmp(&a.size_mb).unwrap_or(std::cmp::Ordering::Equal));
+        Ok(leftovers)
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = (app_name, publisher, install_location);
+        Ok(Vec::new())
+    }
+}
+
+/// 执行清理命令
+/// items 支持两类输入：
+/// - 文件/目录路径: C:\\xxx\\yyy
+/// - 注册表路径: HKCU\\Software\\xxx 或 HKLM\\Software\\xxx
+pub fn execute_cleanup(
+    items: Vec<String>,
+    app_name: Option<String>,
+    publisher: Option<String>,
+) -> Result<CleanupResult, String> {
+    #[cfg(windows)]
+    {
+        let cleanup_keywords = build_keywords(
+            app_name.as_deref().unwrap_or_default(),
+            publisher.as_deref(),
+            None,
+        );
+
+        if items.is_empty() {
+            return Ok(CleanupResult {
+                success: true,
+                message: "没有需要清理的项目".to_string(),
+                cleaned_count: 0,
+                failed_items: Vec::new(),
+            });
+        }
+
+        let mut cleaned_count = 0usize;
+        let mut failed_items: Vec<String> = Vec::new();
+
+        for item in items {
+            if let Some((hkey, sub_path)) = parse_registry_path(&item) {
+                if !is_safe_registry_cleanup_target(hkey, sub_path, &cleanup_keywords) {
+                    failed_items.push(item);
+                    continue;
+                }
+
+                let deleted = RegKey::predef(hkey)
+                    .delete_subkey_all(sub_path)
+                    .is_ok();
+                if deleted {
+                    cleaned_count += 1;
+                } else {
+                    failed_items.push(item);
+                }
+                continue;
+            }
+
+            let path = PathBuf::from(item.trim());
+            if !path.exists() {
+                continue;
+            }
+
+            if is_blacklisted_path(&path) {
+                failed_items.push(path.to_string_lossy().to_string());
+                continue;
+            }
+
+            let delete_result = if path.is_dir() {
+                fs::remove_dir_all(&path)
+            } else {
+                fs::remove_file(&path)
+            };
+
+            if delete_result.is_ok() {
+                cleaned_count += 1;
+            } else {
+                failed_items.push(path.to_string_lossy().to_string());
+            }
+        }
+
+        let success = failed_items.is_empty();
+        let message = if success {
+            format!("清理完成，共删除 {} 项", cleaned_count)
+        } else {
+            format!(
+                "清理已完成，成功 {} 项，失败 {} 项",
+                cleaned_count,
+                failed_items.len()
+            )
+        };
+
+        Ok(CleanupResult {
+            success,
+            message,
+            cleaned_count,
+            failed_items,
+        })
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = (items, app_name, publisher);
+        Ok(CleanupResult {
+            success: false,
+            message: "清理功能仅支持 Windows 系统".to_string(),
+            cleaned_count: 0,
+            failed_items: Vec::new(),
+        })
+    }
+}
+
+// ============================================================================
+// 卸载命令解析与执行
+// ============================================================================
+
 #[cfg(windows)]
-fn resolve_uninstall_command(input: &UninstallInput) -> Result<String, String> {
+fn resolve_uninstall_commands(input: &UninstallInput) -> Result<Vec<String>, String> {
     // 路径优先：如果前端传了 registry_path，直接按路径定位
     if let Some(registry_path) = input.registry_path.as_ref() {
-        if let Some(cmd) = read_uninstall_from_registry_path(registry_path) {
-            return Ok(cmd);
+        let cmds = expand_uninstall_command_candidates(read_uninstall_commands_from_registry_path(registry_path));
+        if !cmds.is_empty() {
+            return Ok(cmds);
         }
         return Err(format!("未在指定注册表路径找到可用卸载命令: {}", registry_path));
     }
 
     // 其次按 app_id（这里按 DisplayName 匹配）回查注册表
     if let Some(app_id) = input.app_id.as_ref() {
-        if let Some(cmd) = find_uninstall_by_display_name(app_id) {
-            return Ok(cmd);
+        let cmds = expand_uninstall_command_candidates(find_uninstall_commands_by_display_name(app_id));
+        if !cmds.is_empty() {
+            return Ok(cmds);
         }
         return Err(format!("未找到应用 '{}' 的卸载命令", app_id));
     }
@@ -88,13 +484,21 @@ fn start_uninstall_process(uninstall_cmd: &str) -> Result<(), String> {
         return Err("卸载命令为空".to_string());
     }
 
-    // 方案 A：优先按“可执行文件 + 参数”直接启动，避免 cmd 对特殊字符误解释
+    let mut normalized_shell_cmd: Option<String> = None;
+
+    // 方案 A：按“程序 + 参数”直接启动并等待结束
     if let Some((program, args)) = parse_program_and_args(cmd) {
+        normalized_shell_cmd = Some(build_cmd_invocation(&program, &args));
+        let display_cmd = if args.is_empty() {
+            program.clone()
+        } else {
+            format!("{} {}", program, args.join(" "))
+        };
+
         if is_definitely_invalid_program(&program) {
             return Err(format!("卸载命令无效，程序路径非法: {}", program));
         }
 
-        // 对绝对路径 exe 做存在性预检查，避免弹系统“找不到文件”对话框
         let is_path_like = program.contains('\\') || program.contains(':');
         if is_path_like && !program.eq_ignore_ascii_case("msiexec") && !program.eq_ignore_ascii_case("msiexec.exe") {
             if !Path::new(&program).exists() {
@@ -102,42 +506,149 @@ fn start_uninstall_process(uninstall_cmd: &str) -> Result<(), String> {
             }
         }
 
-        if spawn_and_validate(&program, &args).is_ok() {
+        let working_dir = derive_working_dir(&program);
+        eprintln!(
+            "[orbit-file][uninstall] 直接启动: {} | cwd: {}",
+            display_cmd,
+            working_dir
+                .as_ref()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|| "<default>".to_string())
+        );
+
+        if spawn_and_wait(&program, &args, working_dir.as_deref()).is_ok() {
             return Ok(());
         }
-    }
 
-    // 方案 B：直接交给 cmd /C 执行（兼容复杂 shell 命令）
-    let mut direct_child = Command::new("cmd")
-        .args(["/C", cmd])
-        .spawn()
-        .map_err(|e| format!("启动卸载程序失败: {}", e))?;
-
-    // 等待极短时间用于识别“命令立刻报错退出”的场景
-    // 例如：引号格式不兼容、命令解释失败等
-    thread::sleep(Duration::from_millis(250));
-    if let Ok(Some(status)) = direct_child.try_wait() {
-        if !status.success() {
-            // 方案 C：回退到 start 方式，兼容更多带引号/参数的命令格式
-            let start_cmd = format!("start \"\" {}", cmd);
-            let mut fallback_child = Command::new("cmd")
-                .args(["/C", &start_cmd])
-                .spawn()
-                .map_err(|e| format!("卸载命令执行失败，回退启动也失败: {}", e))?;
-
-            thread::sleep(Duration::from_millis(250));
-            if let Ok(Some(fallback_status)) = fallback_child.try_wait() {
-                if !fallback_status.success() {
-                    return Err(format!(
-                        "卸载程序未能启动，退出码: {}",
-                        fallback_status.code().unwrap_or(-1)
-                    ));
-                }
+        // 方案 A-2：对常见无参数卸载器追加静默参数重试
+        let fallback_args = build_uninstaller_fallback_args(&program, &args);
+        for retry_args in fallback_args {
+            eprintln!(
+                "[orbit-file][uninstall] 回退参数重试: {} {}",
+                program,
+                retry_args.join(" ")
+            );
+            if spawn_and_wait(&program, &retry_args, working_dir.as_deref()).is_ok() {
+                return Ok(());
             }
         }
     }
 
+    let shell_cmd = normalized_shell_cmd.unwrap_or_else(|| cmd.to_string());
+
+    // 方案 B：回退到 cmd /C 执行并等待
+    eprintln!("[orbit-file][uninstall] 回退 cmd /C 执行: {}", shell_cmd);
+    if spawn_and_wait("cmd", &["/C".to_string(), shell_cmd.clone()], None).is_ok() {
+        return Ok(());
+    }
+
+    // 方案 C：使用 start /wait 兼容部分命令解释差异
+    let start_wait_cmd = format!("start \"\" /wait {}", shell_cmd);
+    eprintln!("[orbit-file][uninstall] 回退 start /wait 执行: {}", start_wait_cmd);
+    spawn_and_wait("cmd", &["/C".to_string(), start_wait_cmd], None)
+}
+
+#[cfg(windows)]
+fn build_cmd_invocation(program: &str, args: &[String]) -> String {
+    let mut parts = Vec::with_capacity(args.len() + 1);
+    parts.push(quote_for_cmd(program));
+    parts.extend(args.iter().map(|arg| quote_for_cmd(arg)));
+    parts.join(" ")
+}
+
+#[cfg(windows)]
+fn quote_for_cmd(value: &str) -> String {
+    if value.is_empty() {
+        return "\"\"".to_string();
+    }
+
+    let needs_quotes = value
+        .chars()
+        .any(|ch| ch.is_whitespace() || matches!(ch, '&' | '|' | '<' | '>' | '^' | '(' | ')' | '"'));
+
+    if !needs_quotes {
+        return value.to_string();
+    }
+
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+#[cfg(windows)]
+fn spawn_and_wait(program: &str, args: &[String], working_dir: Option<&Path>) -> Result<(), String> {
+    let mut command = Command::new(program);
+    command.args(args);
+    if let Some(dir) = working_dir {
+        command.current_dir(dir);
+    }
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("启动卸载程序失败: {}", e))?;
+
+    // 关键变更：等待子进程结束，确保后续残留扫描在卸载完成后执行
+    let status = child
+        .wait()
+        .map_err(|e| format!("等待卸载程序结束失败: {}", e))?;
+
+    if !status.success() {
+        let exit_code = status.code().unwrap_or(-1);
+        eprintln!(
+            "[orbit-file][uninstall] 进程退出: program={} code={} args={}",
+            program,
+            exit_code,
+            args.join(" ")
+        );
+
+        // cmd 返回非 0 代表命令解释/执行层失败，不应按可容忍退出码放过
+        if program.eq_ignore_ascii_case("cmd") || program.eq_ignore_ascii_case("cmd.exe") {
+            return Err(format!("cmd 执行卸载命令失败，退出码: {}", exit_code));
+        }
+
+        if !is_tolerable_uninstall_exit_code(exit_code) {
+            return Err(format!("卸载程序执行失败，退出码: {}", exit_code));
+        }
+    }
+
     Ok(())
+}
+
+#[cfg(windows)]
+fn derive_working_dir(program: &str) -> Option<PathBuf> {
+    let path = Path::new(program);
+    if path.exists() {
+        return path.parent().map(|p| p.to_path_buf());
+    }
+    None
+}
+
+#[cfg(windows)]
+fn build_uninstaller_fallback_args(program: &str, args: &[String]) -> Vec<Vec<String>> {
+    if !args.is_empty() {
+        return Vec::new();
+    }
+
+    let file_name = Path::new(program)
+        .file_name()
+        .map(|v| v.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    if !(file_name.contains("uninst") || file_name.contains("uninstall")) {
+        return Vec::new();
+    }
+
+    vec![
+        vec!["/S".to_string()],
+        vec!["/silent".to_string()],
+        vec!["/verysilent".to_string()],
+        vec!["/qn".to_string()],
+    ]
+}
+
+#[cfg(windows)]
+fn is_tolerable_uninstall_exit_code(code: i32) -> bool {
+    // 部分安装/卸载器会在主流程完成后返回非 0 退出码
+    // 这里对常见“可继续后续扫描”的返回码做兼容
+    matches!(code, 1 | 1605 | 1618 | 1641 | 3010)
 }
 
 #[cfg(windows)]
@@ -147,7 +658,6 @@ fn parse_program_and_args(command: &str) -> Option<(String, Vec<String>)> {
         return None;
     }
 
-    // 处理带引号的可执行文件路径
     if let Some(rest) = cmd.strip_prefix('"') {
         let end = rest.find('"')?;
         let program = rest[..end].trim().to_string();
@@ -155,7 +665,6 @@ fn parse_program_and_args(command: &str) -> Option<(String, Vec<String>)> {
         return Some((program, split_command_args(args_raw)));
     }
 
-    // 处理不带引号的命令：第一个空白前视为程序名
     let mut parts = cmd.splitn(2, char::is_whitespace);
     let program = parts.next()?.trim().to_string();
     let args_raw = parts.next().unwrap_or("").trim();
@@ -170,9 +679,7 @@ fn split_command_args(input: &str) -> Vec<String> {
 
     for ch in input.chars() {
         match ch {
-            '"' => {
-                in_quotes = !in_quotes;
-            }
+            '"' => in_quotes = !in_quotes,
             ' ' | '\t' if !in_quotes => {
                 if !current.is_empty() {
                     args.push(current.clone());
@@ -191,52 +698,403 @@ fn split_command_args(input: &str) -> Vec<String> {
 }
 
 #[cfg(windows)]
-fn spawn_and_validate(program: &str, args: &[String]) -> Result<(), String> {
-    let mut child = Command::new(program)
-        .args(args)
-        .spawn()
-        .map_err(|e| format!("启动卸载程序失败: {}", e))?;
-
-    thread::sleep(Duration::from_millis(250));
-    if let Ok(Some(status)) = child.try_wait() {
-        if !status.success() {
-            return Err(format!("卸载程序启动后立即退出，退出码: {}", status.code().unwrap_or(-1)));
-        }
-    }
-
-    Ok(())
-}
-
-#[cfg(windows)]
 fn is_definitely_invalid_program(program: &str) -> bool {
     let p = program.trim().trim_matches('"').trim();
     p.is_empty() || p == "\\" || p == "\\\\" || p == "/"
 }
 
-#[cfg(windows)]
-fn read_uninstall_from_registry_path(path: &str) -> Option<String> {
-    let (hkey, sub_path) = parse_registry_path(path)?;
-    let key = RegKey::predef(hkey).open_subkey(sub_path).ok()?;
+// ============================================================================
+// 残留扫描逻辑（与卸载逻辑解耦）
+// ============================================================================
 
-    // QuietUninstallString 优先
+#[cfg(windows)]
+fn scan_app_residue_internal(
+    app_name: String,
+    publisher: Option<String>,
+    install_location: Option<String>,
+) -> Result<Vec<LeftoverItem>, String> {
+    let keywords = build_keywords(&app_name, publisher.as_deref(), install_location.as_deref());
+    if keywords.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut roots = build_scan_roots(&app_name, install_location);
+    roots.sort();
+    roots.dedup();
+
+    let mut items = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    scan_filesystem_residue(&roots, &keywords, &mut items, &mut seen);
+    scan_registry_residue(&keywords, &mut items, &mut seen);
+
+    Ok(items)
+}
+
+#[cfg(windows)]
+fn build_keywords(app_name: &str, publisher: Option<&str>, install_location: Option<&str>) -> Vec<String> {
+    let mut values = vec![sanitize_search_text(app_name)];
+    if let Some(pub_name) = publisher {
+        values.push(sanitize_search_text(pub_name));
+    }
+
+    if let Some(location) = install_location {
+        values.push(sanitize_search_text(location));
+    }
+
+    let mut keywords = Vec::new();
+    for raw in values {
+        if raw.is_empty() {
+            continue;
+        }
+        for part in raw.split(|c: char| !c.is_alphanumeric()) {
+            let token = part.trim().to_lowercase();
+            if is_meaningful_keyword(&token) && !keywords.contains(&token) {
+                keywords.push(token);
+            }
+        }
+    }
+    keywords
+}
+
+#[cfg(windows)]
+fn is_meaningful_keyword(token: &str) -> bool {
+    if token.is_empty() {
+        return false;
+    }
+
+    let generic_ascii_words = [
+        "app", "apps", "group", "company", "co", "ltd", "inc", "corp", "corporation", "limited", "tech",
+        "technology", "software", "network", "internet", "china", "beijing", "shanghai", "windows", "microsoft",
+    ];
+    let generic_cn_words = ["公司", "集团", "技术", "网络", "软件", "中国", "有限", "科技"];
+
+    if generic_ascii_words.iter().any(|w| *w == token) {
+        return false;
+    }
+
+    if generic_cn_words.iter().any(|w| *w == token) {
+        return false;
+    }
+
+    if token.chars().all(|ch| ch.is_ascii_alphanumeric()) {
+        return token.len() >= 3;
+    }
+
+    token.chars().count() >= 2
+}
+
+#[cfg(windows)]
+fn build_scan_roots(app_name: &str, install_location: Option<String>) -> Vec<String> {
+    let mut roots = vec![
+        std::env::var("APPDATA").unwrap_or_default(),
+        std::env::var("LOCALAPPDATA").unwrap_or_default(),
+        r"C:\ProgramData".to_string(),
+    ];
+
+    if let Some(path) = install_location {
+        if !path.trim().is_empty() {
+            roots.push(path);
+        }
+    }
+
+    for path in find_install_locations_by_app_name(app_name) {
+        roots.push(path);
+    }
+
+    roots.into_iter().filter(|p| !p.trim().is_empty()).collect()
+}
+
+#[cfg(windows)]
+fn scan_filesystem_residue(
+    roots: &[String],
+    keywords: &[String],
+    output: &mut Vec<LeftoverItem>,
+    seen: &mut HashSet<String>,
+) {
+    for root in roots {
+        let root_path = Path::new(root);
+        if !root_path.exists() || !root_path.is_dir() || is_blacklisted_path(root_path) {
+            continue;
+        }
+
+        for entry in WalkDir::new(root_path)
+            .max_depth(5)
+            .into_iter()
+            .filter_map(|entry| entry.ok())
+        {
+            if entry.depth() == 0 {
+                continue;
+            }
+
+            let path = entry.path();
+            if is_blacklisted_path(path) {
+                continue;
+            }
+
+            let name = path
+                .file_name()
+                .map(|v| v.to_string_lossy().to_lowercase())
+                .unwrap_or_default();
+
+            if !matches_keywords(&name, keywords) {
+                continue;
+            }
+
+            let canonical = normalize_path(path);
+            if seen.contains(&canonical) {
+                continue;
+            }
+
+            seen.insert(canonical);
+
+            let item_type = if path.is_dir() { "Folder" } else { "File" };
+            let size_mb = if path.is_dir() {
+                bytes_to_mb(compute_dir_size(path))
+            } else {
+                bytes_to_mb(path.metadata().map(|m| m.len()).unwrap_or(0))
+            };
+
+            output.push(LeftoverItem {
+                path: path.to_string_lossy().to_string(),
+                item_type: item_type.to_string(),
+                size_mb,
+                selected: false,
+            });
+        }
+    }
+}
+
+#[cfg(windows)]
+fn scan_registry_residue(
+    keywords: &[String],
+    output: &mut Vec<LeftoverItem>,
+    seen: &mut HashSet<String>,
+) {
+    let roots = [(HKEY_CURRENT_USER, "HKCU"), (HKEY_LOCAL_MACHINE, "HKLM")];
+
+    for (hkey, hive_name) in roots {
+        let root = RegKey::predef(hkey);
+        let software = match root.open_subkey_with_flags("Software", KEY_READ) {
+            Ok(key) => key,
+            Err(_) => continue,
+        };
+
+        collect_registry_matches(
+            &software,
+            hive_name,
+            "Software",
+            0,
+            3,
+            keywords,
+            output,
+            seen,
+        );
+    }
+}
+
+#[cfg(windows)]
+fn collect_registry_matches(
+    key: &RegKey,
+    hive_name: &str,
+    current_path: &str,
+    depth: usize,
+    max_depth: usize,
+    keywords: &[String],
+    output: &mut Vec<LeftoverItem>,
+    seen: &mut HashSet<String>,
+) {
+    if depth > max_depth {
+        return;
+    }
+
+    for subkey_name in key.enum_keys().filter_map(|x| x.ok()) {
+        let sub_path = format!("{}\\{}", current_path, subkey_name);
+        let sub_path_lower = sub_path.to_lowercase();
+        let matched = matches_keywords(&sub_path_lower, keywords);
+
+        if matched {
+            let registry_path = format!("{}\\{}", hive_name, sub_path);
+            let canonical = registry_path.to_lowercase();
+            if !seen.contains(&canonical) {
+                seen.insert(canonical);
+                output.push(LeftoverItem {
+                    path: registry_path,
+                    item_type: "Registry".to_string(),
+                    size_mb: 0.0,
+                    selected: false,
+                });
+            }
+        }
+
+        if depth < max_depth {
+            if let Ok(subkey) = key.open_subkey_with_flags(&subkey_name, KEY_READ) {
+                collect_registry_matches(
+                    &subkey,
+                    hive_name,
+                    &sub_path,
+                    depth + 1,
+                    max_depth,
+                    keywords,
+                    output,
+                    seen,
+                );
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn find_install_locations_by_app_name(app_name: &str) -> Vec<String> {
+    let query = sanitize_search_text(app_name).to_lowercase();
+    if query.is_empty() {
+        return Vec::new();
+    }
+
+    let mut paths = Vec::new();
+    let registry_roots: [(HKEY, &str); 3] = [
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ];
+
+    for (hkey, path) in registry_roots {
+        let uninstall_key = match RegKey::predef(hkey).open_subkey(path) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+
+        for subkey_name in uninstall_key.enum_keys().filter_map(|x| x.ok()) {
+            let subkey = match uninstall_key.open_subkey(&subkey_name) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let display_name: String = subkey.get_value("DisplayName").unwrap_or_default();
+            if !sanitize_search_text(&display_name).to_lowercase().contains(&query) {
+                continue;
+            }
+
+            let location: String = subkey.get_value("InstallLocation").unwrap_or_default();
+            let normalized = sanitize_search_text(&location);
+            if !normalized.is_empty() {
+                paths.push(normalized);
+            }
+        }
+    }
+
+    paths
+}
+
+#[cfg(windows)]
+fn compute_dir_size(path: &Path) -> u64 {
+    WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|entry| entry.metadata().ok())
+        .filter(|metadata| metadata.is_file())
+        .map(|metadata| metadata.len())
+        .sum()
+}
+
+#[cfg(windows)]
+fn bytes_to_mb(bytes: u64) -> f64 {
+    ((bytes as f64) / 1024.0 / 1024.0 * 100.0).round() / 100.0
+}
+
+#[cfg(windows)]
+fn normalize_path(path: &Path) -> String {
+    path.to_string_lossy().to_lowercase()
+}
+
+#[cfg(windows)]
+fn is_blacklisted_path(path: &Path) -> bool {
+    let normalized = normalize_path(path);
+
+    if normalized == r"c:\windows"
+        || normalized.starts_with(r"c:\windows\")
+        || normalized == r"c:\windows\system32"
+        || normalized.starts_with(r"c:\windows\system32\")
+        || normalized == r"c:\program files"
+        || normalized == r"c:\program files (x86)"
+    {
+        return true;
+    }
+
+    // AppData 下的系统关键目录一律跳过，防止模糊命中造成误报/误删
+    let is_appdata = normalized.contains(r"\appdata\local\") || normalized.contains(r"\appdata\roaming\");
+    if is_appdata && BLACKLIST.iter().any(|segment| normalized.contains(segment)) {
+        return true;
+    }
+
+    // 防止删除盘符根目录
+    if path.parent().is_none() {
+        return true;
+    }
+
+    false
+}
+
+#[cfg(windows)]
+fn is_blacklisted_registry_path(_hkey: HKEY, sub_path: &str) -> bool {
+    let normalized = sub_path.trim().to_lowercase();
+
+    // 防止删除根级 Software 节点
+    if normalized == "software" {
+        return true;
+    }
+
+    // 防止误删系统核心注册表路径
+    if normalized == r"software\microsoft" || normalized.starts_with(r"software\microsoft\windows") {
+        return true;
+    }
+
+    false
+}
+
+// ============================================================================
+// 注册表/命令辅助函数
+// ============================================================================
+
+#[cfg(windows)]
+fn read_uninstall_commands_from_registry_path(path: &str) -> Vec<String> {
+    let (hkey, sub_path) = match parse_registry_path(path) {
+        Some(v) => v,
+        None => return Vec::new(),
+    };
+    let key = match RegKey::predef(hkey).open_subkey(sub_path) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+
+    let mut cmds = Vec::new();
+
     let quiet: String = key.get_value("QuietUninstallString").unwrap_or_default();
     if is_valid_uninstall_command(&quiet) {
-        return Some(quiet.trim().to_string());
+        cmds.push(quiet.trim().to_string());
     }
 
     let normal: String = key.get_value("UninstallString").unwrap_or_default();
     if is_valid_uninstall_command(&normal) {
-        return Some(normal.trim().to_string());
+        let normalized = normal.trim().to_string();
+        if !cmds.iter().any(|v| v.eq_ignore_ascii_case(&normalized)) {
+            cmds.push(normalized);
+        }
     }
 
-    None
+    cmds
 }
 
 #[cfg(windows)]
 fn find_uninstall_by_display_name(app_id: &str) -> Option<String> {
+    find_uninstall_commands_by_display_name(app_id).into_iter().next()
+}
+
+#[cfg(windows)]
+fn find_uninstall_commands_by_display_name(app_id: &str) -> Vec<String> {
     let query = app_id.trim().to_lowercase();
     if query.is_empty() {
-        return None;
+        return Vec::new();
     }
 
     let registry_roots: [(HKEY, &str); 3] = [
@@ -262,19 +1120,28 @@ fn find_uninstall_by_display_name(app_id: &str) -> Option<String> {
                 continue;
             }
 
+            let mut cmds = Vec::new();
+
             let quiet: String = subkey.get_value("QuietUninstallString").unwrap_or_default();
             if is_valid_uninstall_command(&quiet) {
-                return Some(quiet.trim().to_string());
+                cmds.push(quiet.trim().to_string());
             }
 
             let normal: String = subkey.get_value("UninstallString").unwrap_or_default();
             if is_valid_uninstall_command(&normal) {
-                return Some(normal.trim().to_string());
+                let normalized = normal.trim().to_string();
+                if !cmds.iter().any(|v| v.eq_ignore_ascii_case(&normalized)) {
+                    cmds.push(normalized);
+                }
+            }
+
+            if !cmds.is_empty() {
+                return cmds;
             }
         }
     }
 
-    None
+    Vec::new()
 }
 
 #[cfg(windows)]
@@ -301,7 +1168,6 @@ fn is_valid_uninstall_command(command: &str) -> bool {
         return false;
     }
 
-    // 一些注册表项会写入无效占位值，典型表现是仅有反斜杠
     let normalized = trimmed.trim_matches('"').trim();
     if normalized.is_empty() {
         return false;
