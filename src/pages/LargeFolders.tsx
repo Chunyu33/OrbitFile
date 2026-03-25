@@ -22,7 +22,7 @@ import {
   Bird
 } from 'lucide-react';
 import Toast, { useToast } from '../components/Toast';
-import { LargeFolder, MigrationResult, ProcessLockResult } from '../types';
+import { LargeFolder, MigrationResult, ProcessLockResult, SpecialFolder } from '../types';
 
 // 格式化文件大小
 function formatSize(bytes: number): string {
@@ -48,6 +48,39 @@ function getFolderIcon(iconId: string) {
     feishu: <Bird className="w-5 h-5" />,
   };
   return iconMap[iconId] || <FolderOpen className="w-5 h-5" />;
+}
+
+// 特殊目录元数据映射（用于 UI 显示与进程预检）
+const SPECIAL_FOLDER_META: Record<string, { displayName: string; iconId: string; processNames: string[] }> = {
+  wechat: { displayName: '微信', iconId: 'wechat', processNames: ['WeChat.exe'] },
+  qq: { displayName: 'QQ', iconId: 'qq', processNames: ['QQ.exe'] },
+  tim: { displayName: 'TIM', iconId: 'qq', processNames: ['TIM.exe'] },
+  wxwork: { displayName: '企业微信', iconId: 'wxwork', processNames: ['WXWork.exe'] },
+  dingtalk: { displayName: '钉钉', iconId: 'dingtalk', processNames: ['DingTalk.exe'] },
+  feishu: { displayName: '飞书', iconId: 'feishu', processNames: ['Feishu.exe', 'Lark.exe'] },
+};
+
+function toLargeFolder(special: SpecialFolder): LargeFolder {
+  const meta = SPECIAL_FOLDER_META[special.name] ?? {
+    displayName: special.name,
+    iconId: 'folder',
+    processNames: [],
+  };
+
+  const sizeBytes = Math.max(0, Math.round(special.size_mb * 1024 * 1024));
+
+  return {
+    id: special.name,
+    display_name: meta.displayName,
+    path: special.current_path,
+    size: sizeBytes,
+    folder_type: 'AppData',
+    is_junction: false,
+    junction_target: null,
+    app_process_names: meta.processNames,
+    icon_id: meta.iconId,
+    exists: special.is_detected,
+  };
 }
 
 // 根据文件夹类型返回颜色
@@ -400,8 +433,16 @@ export default function LargeFolders() {
   async function fetchFolders() {
     try {
       setLoading(true);
-      const result = await invoke<LargeFolder[]>('get_large_folders');
-      setFolders(result);
+
+      const [allLargeFolders, specialFolders] = await Promise.all([
+        invoke<LargeFolder[]>('get_large_folders'),
+        invoke<SpecialFolder[]>('get_special_folders_status'),
+      ]);
+
+      const systemFolders = allLargeFolders.filter((folder) => folder.folder_type === 'System');
+      const detectedSpecialFolders = specialFolders.map(toLargeFolder);
+
+      setFolders([...systemFolders, ...detectedSpecialFolders]);
     } catch (error) {
       console.error('获取大文件夹列表失败:', error);
       showToast('获取文件夹列表失败', 'error');
@@ -471,11 +512,17 @@ export default function LargeFolders() {
 
     try {
       showToast(`正在迁移 ${folder.display_name}...`, 'info');
-      
-      const result = await invoke<MigrationResult>('migrate_large_folder', {
-        sourcePath: folder.path,
-        targetDir,
-      });
+
+      const result = folder.folder_type === 'AppData'
+        ? await invoke<MigrationResult>('migrate_special_folder', {
+            appName: folder.id,
+            sourcePath: folder.path,
+            targetDir,
+          })
+        : await invoke<MigrationResult>('migrate_large_folder', {
+            sourcePath: folder.path,
+            targetDir,
+          });
 
       if (result.success) {
         showToast(result.message, 'success');

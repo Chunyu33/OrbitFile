@@ -143,6 +143,18 @@ pub(crate) fn extract_icon_to_base64(icon_path: &str) -> String {
     }
 }
 
+/// 获取特殊应用目录检测状态（动态路径）
+#[tauri::command]
+fn get_special_folders_status() -> Result<Vec<app_manager::detector::SpecialFolder>, String> {
+    app_manager::detector::get_special_folders_status()
+}
+
+/// 迁移特殊应用目录（含进程预检）
+#[tauri::command]
+fn migrate_special_folder(app_name: String, source_path: String, target_dir: String) -> Result<MigrationResult, String> {
+    app_manager::detector::migrate_special_folder(app_name, source_path, target_dir)
+}
+
 /// 解析图标路径，分离文件路径和图标索引
 /// 
 /// # 示例
@@ -1650,7 +1662,9 @@ pub fn run() {
             restore_app,
             open_folder,
             get_large_folders,
+            get_special_folders_status,
             migrate_large_folder,
+            migrate_special_folder,
             restore_large_folder,
             check_link_status,
             clean_ghost_links,

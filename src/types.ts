@@ -126,6 +126,21 @@ export interface LargeFolder {
 }
 
 /**
+ * 特殊应用目录状态
+ * 对应 Rust 后端的 SpecialFolder 结构体
+ */
+export interface SpecialFolder {
+  // 应用标识（wechat / qq / tim / wxwork / dingtalk / feishu）
+  name: string;
+  // 当前检测到的路径（未检测到时为默认候选路径）
+  current_path: string;
+  // 是否成功检测到真实目录
+  is_detected: boolean;
+  // 目录大小（MB）
+  size_mb: number;
+}
+
+/**
  * 迁移结果接口
  * 对应 Rust 后端的 MigrationResult 结构体
  */

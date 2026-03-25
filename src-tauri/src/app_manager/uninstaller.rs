@@ -23,7 +23,7 @@ use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ};
 use winreg::{HKEY, RegKey};
 
 #[cfg(windows)]
-const BLACKLIST: &[&str] = &[r"\microsoft\", r"\windows\", r"\packages\microsoft."];
+const BLACKLIST: &[&str] = &["microsoft", "windows", "common files", "tauri", "webview2"];
 
 /// 卸载请求参数
 /// 支持按 app_id（通常传显示名）或 registry_path 定位应用
@@ -41,6 +41,81 @@ fn sanitize_search_text(raw: &str) -> String {
         .trim()
         .trim_matches('"')
         .to_string()
+}
+
+#[cfg(windows)]
+#[derive(Debug, Clone)]
+struct StrictScanContext {
+    app_name_exact: String,
+    app_folder_name: String,
+    publisher_name: Option<String>,
+    install_location: Option<String>,
+    uninstall_path_hints: Vec<String>,
+}
+
+#[cfg(windows)]
+fn normalize_match_text(raw: &str) -> String {
+    sanitize_search_text(raw).to_lowercase()
+}
+
+#[cfg(windows)]
+fn normalize_windows_path(raw: &str) -> String {
+    normalize_match_text(raw).replace('/', r"\")
+}
+
+#[cfg(windows)]
+fn extract_last_path_component(path: &str) -> Option<String> {
+    let normalized = normalize_windows_path(path);
+    if normalized.is_empty() {
+        return None;
+    }
+
+    Path::new(&normalized)
+        .file_name()
+        .map(|v| normalize_match_text(&v.to_string_lossy()))
+        .filter(|v| !v.is_empty())
+}
+
+#[cfg(windows)]
+fn build_strict_scan_context(
+    app_name: &str,
+    publisher: Option<&str>,
+    install_location: Option<&str>,
+) -> Option<StrictScanContext> {
+    let app_name_exact = normalize_match_text(app_name);
+    if app_name_exact.is_empty() {
+        return None;
+    }
+
+    let install_location = install_location
+        .map(normalize_windows_path)
+        .filter(|v| !v.is_empty());
+
+    let app_folder_name = install_location
+        .as_deref()
+        .and_then(extract_last_path_component)
+        .or_else(|| {
+            app_name_exact
+                .split(|c: char| matches!(c, '\\' | '/' | ':' | '"' | '*' | '?' | '<' | '>' | '|'))
+                .map(str::trim)
+                .filter(|v| !v.is_empty())
+                .max_by_key(|v| v.len())
+                .map(|v| v.to_string())
+        })?;
+
+    let publisher_name = publisher
+        .map(normalize_match_text)
+        .filter(|v| !v.is_empty());
+
+    let uninstall_path_hints = collect_uninstall_path_hints(&app_name_exact, install_location.as_deref());
+
+    Some(StrictScanContext {
+        app_name_exact,
+        app_folder_name,
+        publisher_name,
+        install_location,
+        uninstall_path_hints,
+    })
 }
 
 #[cfg(windows)]
@@ -713,10 +788,9 @@ fn scan_app_residue_internal(
     publisher: Option<String>,
     install_location: Option<String>,
 ) -> Result<Vec<LeftoverItem>, String> {
-    let keywords = build_keywords(&app_name, publisher.as_deref(), install_location.as_deref());
-    if keywords.is_empty() {
+    let Some(context) = build_strict_scan_context(&app_name, publisher.as_deref(), install_location.as_deref()) else {
         return Ok(Vec::new());
-    }
+    };
 
     let mut roots = build_scan_roots(&app_name, install_location);
     roots.sort();
@@ -725,8 +799,8 @@ fn scan_app_residue_internal(
     let mut items = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
-    scan_filesystem_residue(&roots, &keywords, &mut items, &mut seen);
-    scan_registry_residue(&keywords, &mut items, &mut seen);
+    scan_filesystem_residue(&roots, &context, &mut items, &mut seen);
+    scan_registry_residue(&context, &mut items, &mut seen);
 
     Ok(items)
 }
@@ -808,7 +882,7 @@ fn build_scan_roots(app_name: &str, install_location: Option<String>) -> Vec<Str
 #[cfg(windows)]
 fn scan_filesystem_residue(
     roots: &[String],
-    keywords: &[String],
+    context: &StrictScanContext,
     output: &mut Vec<LeftoverItem>,
     seen: &mut HashSet<String>,
 ) {
@@ -832,12 +906,7 @@ fn scan_filesystem_residue(
                 continue;
             }
 
-            let name = path
-                .file_name()
-                .map(|v| v.to_string_lossy().to_lowercase())
-                .unwrap_or_default();
-
-            if !matches_keywords(&name, keywords) {
+            if !matches_strict_leftover_path(path, context) {
                 continue;
             }
 
@@ -867,86 +936,196 @@ fn scan_filesystem_residue(
 
 #[cfg(windows)]
 fn scan_registry_residue(
-    keywords: &[String],
+    context: &StrictScanContext,
     output: &mut Vec<LeftoverItem>,
     seen: &mut HashSet<String>,
 ) {
-    let roots = [(HKEY_CURRENT_USER, "HKCU"), (HKEY_LOCAL_MACHINE, "HKLM")];
+    let registry_roots: [(HKEY, &str, &str); 3] = [
+        (HKEY_LOCAL_MACHINE, "HKLM", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (HKEY_LOCAL_MACHINE, "HKLM", r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (HKEY_CURRENT_USER, "HKCU", r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ];
 
-    for (hkey, hive_name) in roots {
-        let root = RegKey::predef(hkey);
-        let software = match root.open_subkey_with_flags("Software", KEY_READ) {
-            Ok(key) => key,
+    for (hkey, hive_name, root_path) in registry_roots {
+        let uninstall_root = match RegKey::predef(hkey).open_subkey_with_flags(root_path, KEY_READ) {
+            Ok(v) => v,
             Err(_) => continue,
         };
 
-        collect_registry_matches(
-            &software,
-            hive_name,
-            "Software",
-            0,
-            3,
-            keywords,
-            output,
-            seen,
-        );
+        for subkey_name in uninstall_root.enum_keys().filter_map(|x| x.ok()) {
+            let full_sub_path = format!(r"{}\{}", root_path, subkey_name);
+            let subkey = match RegKey::predef(hkey).open_subkey_with_flags(&full_sub_path, KEY_READ) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            if !matches_registry_key_strict(&subkey, context) {
+                continue;
+            }
+
+            let registry_path = format!(r"{}\{}", hive_name, full_sub_path);
+            let canonical = registry_path.to_lowercase();
+            if seen.contains(&canonical) {
+                continue;
+            }
+
+            seen.insert(canonical);
+            output.push(LeftoverItem {
+                path: registry_path,
+                item_type: "Registry".to_string(),
+                size_mb: 0.0,
+                selected: false,
+            });
+        }
     }
 }
 
 #[cfg(windows)]
-fn collect_registry_matches(
-    key: &RegKey,
-    hive_name: &str,
-    current_path: &str,
-    depth: usize,
-    max_depth: usize,
-    keywords: &[String],
-    output: &mut Vec<LeftoverItem>,
-    seen: &mut HashSet<String>,
-) {
-    if depth > max_depth {
-        return;
+fn matches_registry_key_strict(key: &RegKey, context: &StrictScanContext) -> bool {
+    let display_name: String = key.get_value("DisplayName").unwrap_or_default();
+    let display_name = normalize_match_text(&display_name);
+    if !display_name.is_empty() && display_name == context.app_name_exact {
+        return true;
     }
 
-    for subkey_name in key.enum_keys().filter_map(|x| x.ok()) {
-        let sub_path = format!("{}\\{}", current_path, subkey_name);
-        let sub_path_lower = sub_path.to_lowercase();
-        let matched = matches_keywords(&sub_path_lower, keywords);
+    let uninstall_candidates = [
+        key.get_value::<String, _>("UninstallString").unwrap_or_default(),
+        key.get_value::<String, _>("QuietUninstallString").unwrap_or_default(),
+    ];
 
-        if matched {
-            let registry_path = format!("{}\\{}", hive_name, sub_path);
-            let canonical = registry_path.to_lowercase();
-            if !seen.contains(&canonical) {
-                seen.insert(canonical);
-                output.push(LeftoverItem {
-                    path: registry_path,
-                    item_type: "Registry".to_string(),
-                    size_mb: 0.0,
-                    selected: false,
-                });
-            }
+    uninstall_candidates
+        .into_iter()
+        .map(|v| normalize_windows_path(&v))
+        .filter(|v| !v.is_empty())
+        .any(|value| {
+            context
+                .uninstall_path_hints
+                .iter()
+                .any(|hint| !hint.is_empty() && value.contains(hint))
+        })
+}
+
+#[cfg(windows)]
+fn matches_strict_leftover_path(path: &Path, context: &StrictScanContext) -> bool {
+    let normalized_path = normalize_path(path);
+    if BLACKLIST.iter().any(|token| normalized_path.contains(token)) {
+        return false;
+    }
+
+    if let Some(install_location) = context.install_location.as_ref() {
+        if normalized_path == *install_location {
+            return true;
         }
+    }
 
-        if depth < max_depth {
-            if let Ok(subkey) = key.open_subkey_with_flags(&subkey_name, KEY_READ) {
-                collect_registry_matches(
-                    &subkey,
-                    hive_name,
-                    &sub_path,
-                    depth + 1,
-                    max_depth,
-                    keywords,
-                    output,
-                    seen,
-                );
+    let components: Vec<String> = path
+        .components()
+        .map(|c| normalize_match_text(&c.as_os_str().to_string_lossy()))
+        .filter(|v| !v.is_empty())
+        .collect();
+
+    if components.is_empty() {
+        return false;
+    }
+
+    let app_indexes: Vec<usize> = components
+        .iter()
+        .enumerate()
+        .filter_map(|(idx, value)| if *value == context.app_folder_name { Some(idx) } else { None })
+        .collect();
+
+    if app_indexes.is_empty() {
+        return false;
+    }
+
+    if let Some(publisher) = context.publisher_name.as_ref() {
+        if normalized_path.contains(publisher) {
+            let publisher_index = components
+                .iter()
+                .position(|value| value.contains(publisher) || publisher.contains(value));
+
+            // Rule B: 命中发布商目录时，必须在更深层出现精确应用目录名
+            match publisher_index {
+                Some(pub_idx) if app_indexes.iter().any(|app_idx| *app_idx > pub_idx) => return true,
+                Some(_) => return false,
+                None => return false,
             }
         }
     }
+
+    // Rule A: 任意层出现精确应用目录名，才视为残留
+    true
+}
+
+#[cfg(windows)]
+fn collect_uninstall_path_hints(app_name_exact: &str, install_location: Option<&str>) -> Vec<String> {
+    let mut hints: Vec<String> = Vec::new();
+
+    if let Some(location) = install_location {
+        let normalized = normalize_windows_path(location);
+        if !normalized.is_empty() {
+            hints.push(normalized);
+        }
+    }
+
+    let registry_roots: [(HKEY, &str); 3] = [
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ];
+
+    for (hkey, path) in registry_roots {
+        let uninstall_key = match RegKey::predef(hkey).open_subkey_with_flags(path, KEY_READ) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        for subkey_name in uninstall_key.enum_keys().filter_map(|x| x.ok()) {
+            let subkey = match uninstall_key.open_subkey_with_flags(&subkey_name, KEY_READ) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let display_name: String = subkey.get_value("DisplayName").unwrap_or_default();
+            if normalize_match_text(&display_name) != app_name_exact {
+                continue;
+            }
+
+            for command in [
+                subkey.get_value::<String, _>("UninstallString").unwrap_or_default(),
+                subkey.get_value::<String, _>("QuietUninstallString").unwrap_or_default(),
+            ] {
+                if let Some(path_hint) = extract_uninstall_path_hint(&command) {
+                    hints.push(path_hint);
+                }
+            }
+        }
+    }
+
+    hints.sort();
+    hints.dedup();
+    hints
+}
+
+#[cfg(windows)]
+fn extract_uninstall_path_hint(command: &str) -> Option<String> {
+    let (program, _) = parse_program_and_args(command)?;
+    let normalized = normalize_windows_path(&program);
+    if normalized.is_empty() {
+        return None;
+    }
+
+    // MSI GUID 这类非路径命令不作为路径证据
+    if normalized.contains("msiexec") && !normalized.contains('\\') {
+        return None;
+    }
+
+    Some(normalized)
 }
 
 #[cfg(windows)]
 fn find_install_locations_by_app_name(app_name: &str) -> Vec<String> {
-    let query = sanitize_search_text(app_name).to_lowercase();
+    let query = normalize_match_text(app_name);
     if query.is_empty() {
         return Vec::new();
     }
@@ -971,7 +1150,7 @@ fn find_install_locations_by_app_name(app_name: &str) -> Vec<String> {
             };
 
             let display_name: String = subkey.get_value("DisplayName").unwrap_or_default();
-            if !sanitize_search_text(&display_name).to_lowercase().contains(&query) {
+            if normalize_match_text(&display_name) != query {
                 continue;
             }
 
@@ -1021,9 +1200,7 @@ fn is_blacklisted_path(path: &Path) -> bool {
         return true;
     }
 
-    // AppData 下的系统关键目录一律跳过，防止模糊命中造成误报/误删
-    let is_appdata = normalized.contains(r"\appdata\local\") || normalized.contains(r"\appdata\roaming\");
-    if is_appdata && BLACKLIST.iter().any(|segment| normalized.contains(segment)) {
+    if BLACKLIST.iter().any(|token| normalized.contains(token)) {
         return true;
     }
 
