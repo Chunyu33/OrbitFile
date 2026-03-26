@@ -179,7 +179,7 @@ function AppCard({
               disabled={isUninstalling}
               style={{ minWidth: '96px' }}
             >
-              {isUninstalling ? 'Uninstalling...' : '强力卸载'}
+              {isUninstalling ? '卸载中...' : '强力卸载'}
             </button>
           </>
         )}

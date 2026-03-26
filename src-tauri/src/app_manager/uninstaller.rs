@@ -560,6 +560,9 @@ fn start_uninstall_process(uninstall_cmd: &str) -> Result<(), String> {
     }
 
     let mut normalized_shell_cmd: Option<String> = None;
+    let mut should_use_shell_fallback = true;
+    let mut last_error: Option<String> = None;
+    let mut allow_elevation_retry = false;
 
     // 方案 A：按“程序 + 参数”直接启动并等待结束
     if let Some((program, args)) = parse_program_and_args(cmd) {
@@ -579,6 +582,11 @@ fn start_uninstall_process(uninstall_cmd: &str) -> Result<(), String> {
             if !Path::new(&program).exists() {
                 return Err(format!("卸载程序不存在: {}", program));
             }
+
+            // 对可直接执行的本地卸载器，优先走原生进程启动
+            // 避免 cmd 回退对引号/转义再次处理导致路径被误解析
+            should_use_shell_fallback = false;
+            allow_elevation_retry = true;
         }
 
         let working_dir = derive_working_dir(&program);
@@ -591,8 +599,20 @@ fn start_uninstall_process(uninstall_cmd: &str) -> Result<(), String> {
                 .unwrap_or_else(|| "<default>".to_string())
         );
 
-        if spawn_and_wait(&program, &args, working_dir.as_deref()).is_ok() {
-            return Ok(());
+        match spawn_and_wait(&program, &args, working_dir.as_deref()) {
+            Ok(_) => return Ok(()),
+            Err(err) => {
+                if allow_elevation_retry && is_elevation_required_error(&err) {
+                    eprintln!(
+                        "[orbit-file][uninstall] 检测到权限提升需求，尝试提权执行: {} {}",
+                        program,
+                        args.join(" ")
+                    );
+
+                    return spawn_elevated_and_wait(&program, &args, working_dir.as_deref());
+                }
+                last_error = Some(err);
+            }
         }
 
         // 方案 A-2：对常见无参数卸载器追加静默参数重试
@@ -603,24 +623,144 @@ fn start_uninstall_process(uninstall_cmd: &str) -> Result<(), String> {
                 program,
                 retry_args.join(" ")
             );
-            if spawn_and_wait(&program, &retry_args, working_dir.as_deref()).is_ok() {
-                return Ok(());
+            match spawn_and_wait(&program, &retry_args, working_dir.as_deref()) {
+                Ok(_) => return Ok(()),
+                Err(err) => {
+                    if allow_elevation_retry && is_elevation_required_error(&err) {
+                        eprintln!(
+                            "[orbit-file][uninstall] 参数重试触发提权执行: {} {}",
+                            program,
+                            retry_args.join(" ")
+                        );
+
+                        return spawn_elevated_and_wait(&program, &retry_args, working_dir.as_deref());
+                    }
+                    last_error = Some(err);
+                }
             }
         }
+    }
+
+    // 已确认是本地可执行文件但直接执行失败时，不再回退 cmd，避免额外的误导性弹窗
+    if !should_use_shell_fallback {
+        return Err(last_error.unwrap_or_else(|| "卸载程序执行失败".to_string()));
     }
 
     let shell_cmd = normalized_shell_cmd.unwrap_or_else(|| cmd.to_string());
 
     // 方案 B：回退到 cmd /C 执行并等待
     eprintln!("[orbit-file][uninstall] 回退 cmd /C 执行: {}", shell_cmd);
-    if spawn_and_wait("cmd", &["/C".to_string(), shell_cmd.clone()], None).is_ok() {
+    if spawn_cmd_shell_and_wait(&shell_cmd).is_ok() {
         return Ok(());
     }
 
     // 方案 C：使用 start /wait 兼容部分命令解释差异
     let start_wait_cmd = format!("start \"\" /wait {}", shell_cmd);
     eprintln!("[orbit-file][uninstall] 回退 start /wait 执行: {}", start_wait_cmd);
-    spawn_and_wait("cmd", &["/C".to_string(), start_wait_cmd], None)
+    spawn_cmd_shell_and_wait(&start_wait_cmd)
+}
+
+#[cfg(windows)]
+fn spawn_cmd_shell_and_wait(shell_cmd: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    let mut command = Command::new("cmd");
+    command.arg("/D").arg("/S").arg("/C");
+    command.raw_arg(shell_cmd);
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("启动 cmd 失败: {}", e))?;
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("等待 cmd 结束失败: {}", e))?;
+
+    if !status.success() {
+        let exit_code = status.code().unwrap_or(-1);
+        eprintln!(
+            "[orbit-file][uninstall] 进程退出: program=cmd code={} shell_cmd={}",
+            exit_code,
+            shell_cmd
+        );
+        return Err(format!("cmd 执行卸载命令失败，退出码: {}", exit_code));
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn is_elevation_required_error(message: &str) -> bool {
+    let normalized = message.to_lowercase();
+    normalized.contains("os error 740")
+        || normalized.contains("elevation")
+        || normalized.contains("需要提升")
+}
+
+#[cfg(windows)]
+fn spawn_elevated_and_wait(program: &str, args: &[String], working_dir: Option<&Path>) -> Result<(), String> {
+    let escaped_program = escape_ps_single_quoted(program);
+    let escaped_working_dir = working_dir
+        .map(|dir| escape_ps_single_quoted(&dir.to_string_lossy()))
+        .unwrap_or_default();
+
+    let arg_clause = if args.is_empty() {
+        String::new()
+    } else {
+        let quoted_args = args
+            .iter()
+            .map(|arg| format!("'{}'", escape_ps_single_quoted(arg)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(" -ArgumentList @({})", quoted_args)
+    };
+
+    let script = if escaped_working_dir.is_empty() {
+        format!(
+            "$ErrorActionPreference='Stop'; \
+             $p=Start-Process -FilePath '{}'{} -Verb RunAs -Wait -PassThru; \
+             exit $p.ExitCode",
+            escaped_program, arg_clause
+        )
+    } else {
+        format!(
+            "$ErrorActionPreference='Stop'; \
+             $p=Start-Process -FilePath '{}'{} -WorkingDirectory '{}' -Verb RunAs -Wait -PassThru; \
+             exit $p.ExitCode",
+            escaped_program, arg_clause, escaped_working_dir
+        )
+    };
+
+    let mut command = Command::new("powershell");
+    command
+        .arg("-NoProfile")
+        .arg("-NonInteractive")
+        .arg("-ExecutionPolicy")
+        .arg("Bypass")
+        .arg("-Command")
+        .arg(script);
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("启动提权卸载失败: {}", e))?;
+
+    let status = child
+        .wait()
+        .map_err(|e| format!("等待提权卸载结束失败: {}", e))?;
+
+    if !status.success() {
+        let code = status.code().unwrap_or(-1);
+        if !is_tolerable_uninstall_exit_code(code) {
+            return Err(format!("提权执行卸载失败，退出码: {}", code));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn escape_ps_single_quoted(value: &str) -> String {
+    value.replace("'", "''")
 }
 
 #[cfg(windows)]
