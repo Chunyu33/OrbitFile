@@ -42,9 +42,9 @@ function formatSize(bytes: number): string {
 const APP_INFO = {
   name: 'OrbitFile',
   version: '1.0.0',
-  description: '专业的 Windows 存储重定向工具',
+  description: '专业的 Windows 应用管理、存储重定向工具',
   author: 'Evan Lau',
-  email: '1378813463@qq.com',
+  email: 'liucygm33@gmail.com',
 };
 
 // 关于信息列表（动态数据格式，方便后续扩展）
@@ -672,6 +672,42 @@ export default function Settings() {
                     <li>部分应用可能无法正确识别 Junction 链接</li>
                     <li><strong style={{ color: 'var(--color-success)' }}>建议</strong>：优先迁移微信、QQ、钉钉等应用数据，风险较低</li>
                   </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* 强力卸载说明 */}
+          <div style={{ padding: 'var(--spacing-4) var(--spacing-5)', borderBottom: '1px solid var(--border-color)' }}>
+            <div className="flex items-start" style={{ gap: 'var(--spacing-3)' }}>
+              <div 
+                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--color-danger-light)' }}
+              >
+                <Trash2 className="w-4 h-4" style={{ color: 'var(--color-danger)' }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-medium)', color: 'var(--text-primary)', marginBottom: 'var(--spacing-2)' }}>
+                  强力卸载说明
+                </p>
+                <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-tertiary)', lineHeight: '1.8' }}>
+                  <p style={{ marginBottom: 'var(--spacing-2)' }}>
+                    常规卸载器通常只移除主程序，应用日志、缓存仍可能残留在 <strong style={{ color: 'var(--text-secondary)' }}>AppData</strong>，
+                    同时注册表中的卸载/配置项也可能保留。
+                  </p>
+                  <p style={{ marginBottom: 'var(--spacing-2)' }}>
+                    OrbitFile 的强力卸载流程为：
+                  </p>
+                  <ol style={{ paddingLeft: 'var(--spacing-4)', margin: '0 0 var(--spacing-2) 0' }}>
+                    <li>优先调用应用官方卸载器，并等待卸载进程完成（含必要的提权回退）。</li>
+                    <li>由你手动确认后再触发残留扫描，避免卸载未落盘时误扫。</li>
+                    <li>基于应用名、发布商、安装路径等指纹做“数字残留”匹配，定位文件与注册表痕迹。</li>
+                    <li>仅对确认匹配的条目执行删除，默认不做激进清理。</li>
+                  </ol>
+                  <p style={{ margin: 0 }}>
+                    为保证系统稳定性，清理阶段内置系统目录黑名单与注册表安全校验，
+                    会拒绝删除 Windows/Microsoft 等高风险路径与关键分支。
+                  </p>
                 </div>
               </div>
             </div>

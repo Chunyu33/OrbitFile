@@ -4,20 +4,15 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { confirm, open } from '@tauri-apps/plugin-dialog';
-import { RefreshCw } from 'lucide-react';
-import DiskUsageBar from '../components/DiskUsageBar';
 import AppList from '../components/AppList';
 import MigrationModal from '../components/MigrationModal';
 import CleanupModal from '../components/CleanupModal';
 import Toast, { useToast } from '../components/Toast';
-import { CleanupResult, DiskUsage, InstalledApp, LeftoverItem, MigrationRecord, MigrationResult, MigrationStep, ProcessLockResult, UninstallResult } from '../types';
+import { CleanupResult, InstalledApp, LeftoverItem, MigrationRecord, MigrationResult, MigrationStep, ProcessLockResult, UninstallResult } from '../types';
 
 export default function AppMigration() {
-  const [disks, setDisks] = useState<DiskUsage[]>([]);
-  const [diskLoading, setDiskLoading] = useState(true);
   const [apps, setApps] = useState<InstalledApp[]>([]);
   const [appsLoading, setAppsLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
   
   // 已迁移的路径列表
   const [migratedPaths, setMigratedPaths] = useState<string[]>([]);
@@ -41,19 +36,6 @@ export default function AppMigration() {
   
   // Toast 通知
   const { toast, showToast, hideToast } = useToast();
-
-  async function fetchDiskUsage() {
-    try {
-      setDiskLoading(true);
-      const diskList = await invoke<DiskUsage[]>('get_disk_usage');
-      setDisks(diskList);
-    } catch (error) {
-      console.error('获取磁盘信息失败:', error);
-      setDisks([]);
-    } finally {
-      setDiskLoading(false);
-    }
-  }
 
   // 手动触发残留扫描
   async function handleScanResidue(app: InstalledApp) {
@@ -106,9 +88,7 @@ export default function AppMigration() {
   }
 
   async function handleRefresh() {
-    setRefreshing(true);
-    await Promise.all([fetchDiskUsage(), fetchInstalledApps(), fetchAppMigrationRecords()]);
-    setRefreshing(false);
+    await Promise.all([fetchInstalledApps(), fetchAppMigrationRecords()]);
   }
 
   // 还原流程：将已迁移应用恢复到原始位置
@@ -328,32 +308,15 @@ export default function AppMigration() {
   }
 
   useEffect(() => {
-    fetchDiskUsage();
     fetchInstalledApps();
     fetchAppMigrationRecords();
   }, []);
 
   return (
     <div className="h-full overflow-hidden flex flex-col" style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
-      <div className="h-full max-w-5xl mx-auto flex flex-col w-full" style={{ gap: 'var(--spacing-3)' }}>
-        {/* 顶部：磁盘信息 + 刷新按钮 */}
-        <header className="flex items-center justify-between flex-shrink-0" style={{ gap: 'var(--spacing-4)' }}>
-          {/* 磁盘卡片横向滚动区域 */}
-          <div className="flex-1 min-w-0">
-            <DiskUsageBar disks={disks} loading={diskLoading} />
-          </div>
-          <button
-            onClick={handleRefresh}
-            disabled={refreshing}
-            className="btn btn-secondary flex-shrink-0"
-          >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
-            刷新
-          </button>
-        </header>
-
-        {/* 应用列表区域 - 占据剩余全部空间 */}
-        <section className="flex-1 min-h-0 flex flex-col overflow-hidden">
+      <div className="h-full max-w-5xl mx-auto w-full">
+        {/* 应用列表区域 - 占据全部空间 */}
+        <section className="h-full min-h-0 flex flex-col overflow-hidden">
           <AppList 
             apps={apps} 
             loading={appsLoading} 

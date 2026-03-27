@@ -54,13 +54,13 @@ export default function TitleBar() {
   return (
     <div 
       data-tauri-drag-region
-      style={{ paddingLeft: '12px' }}
-      className="h-9 bg-white flex items-center justify-between pl-4 pr-0 border-b border-[#E5E5E5] select-none"
+      className="h-9 flex items-center justify-between pl-4 pr-0 border-b select-none"
+      style={{ paddingLeft: '12px', background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
     >
       {/* 左侧 Logo */}
       <div data-tauri-drag-region className="flex items-center gap-2">
         <AppIcon />
-        <span className="text-[#191919] font-medium text-sm">OrbitFile</span>
+        <span className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>OrbitFile</span>
       </div>
 
       {/* 右侧窗口控制按钮 */}
@@ -76,13 +76,13 @@ export default function TitleBar() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: minHover ? '#E5E5E5' : 'transparent',
+            background: minHover ? 'var(--bg-hover)' : 'transparent',
             border: 'none',
             cursor: 'pointer',
             transition: 'background 0.15s ease',
           }}
         >
-          <Minus style={{ width: '16px', height: '16px', color: '#666666' }} />
+          <Minus style={{ width: '16px', height: '16px', color: 'var(--text-tertiary)' }} />
         </button>
         
         {/* 关闭按钮 */}
@@ -102,7 +102,7 @@ export default function TitleBar() {
             transition: 'background 0.15s ease',
           }}
         >
-          <X style={{ width: '16px', height: '16px', color: closeHover ? 'white' : '#666666', transition: 'color 0.15s ease' }} />
+          <X style={{ width: '16px', height: '16px', color: closeHover ? 'white' : 'var(--text-tertiary)', transition: 'color 0.15s ease' }} />
         </button>
       </div>
     </div>

@@ -1,13 +1,15 @@
-// 磁盘使用情况组件
-// 显示所有磁盘，支持横向滚动
+// 全局磁盘状态胶囊组件
+// 以状态胶囊 + Popover 的方式展示磁盘信息
 
-import { useMemo } from 'react';
-import { HardDrive } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState, CSSProperties } from 'react';
+import { HardDrive, PieChart, RefreshCw } from 'lucide-react';
 import { DiskUsage } from '../types';
 
 interface DiskUsageBarProps {
   disks: DiskUsage[];
   loading: boolean;
+  refreshing?: boolean;
+  onRefresh?: () => void;
 }
 
 // 格式化字节数为简短格式
@@ -26,170 +28,243 @@ function getUsageColor(percent: number): string {
   return 'var(--color-primary)';
 }
 
-// 单个磁盘卡片组件
-const DiskCard = ({ disk }: { disk: DiskUsage }) => {
+function getDisplayName(mountPoint: string): string {
+  return mountPoint.replace(':\\', '');
+}
+
+// Popover 内部磁盘行
+const DiskRow = ({ disk }: { disk: DiskUsage }) => {
   const usageColor = useMemo(() => getUsageColor(disk.usage_percent), [disk.usage_percent]);
-  const displayName = disk.mount_point.replace(':\\', '');
+  const displayName = getDisplayName(disk.mount_point);
+  const capacityText = `${formatBytes(disk.free_space)} / ${formatBytes(disk.total_space)}`;
   
   return (
     <div
       style={{
-        minWidth: '140px',
-        padding: '12px 16px',
-        background: 'var(--bg-card)',
-        borderRadius: 'var(--radius-lg)',
-        border: '1px solid var(--border-color)',
         display: 'flex',
-        flexDirection: 'column',
-        gap: '8px',
+        alignItems: 'center',
+        gap: '10px',
+        padding: '10px 12px',
+        background: 'var(--bg-hover)',
+        borderRadius: 'var(--radius-sm)',
+        border: '1px solid var(--border-color)',
       }}
     >
-      {/* 磁盘标识 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <div
-          style={{
-            width: '28px',
-            height: '28px',
-            borderRadius: 'var(--radius-md)',
-            background: disk.is_system ? 'var(--color-primary-light)' : 'var(--color-gray-100)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <HardDrive 
-            style={{ 
-              width: '14px', 
-              height: '14px', 
-              color: disk.is_system ? 'var(--color-primary)' : 'var(--text-tertiary)' 
-            }} 
-          />
-        </div>
-        <div>
-          <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-            {displayName}:
-          </div>
-          <div style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-            {disk.name}
-          </div>
-        </div>
-      </div>
-      
-      {/* 进度条 */}
       <div
         style={{
-          height: '6px',
-          background: 'var(--color-gray-100)',
-          borderRadius: '3px',
+          width: '16px',
+          height: '16px',
+          borderRadius: 'var(--radius-sm)',
+          background: disk.is_system ? 'var(--color-primary-light)' : 'var(--color-gray-200)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+        }}
+      >
+        <HardDrive 
+          style={{ 
+            width: '9px', 
+            height: '9px', 
+            color: disk.is_system ? 'var(--color-primary)' : 'var(--text-tertiary)' 
+          }} 
+        />
+      </div>
+
+      <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', width: '30px', flexShrink: 0 }}>
+        {displayName}:
+      </span>
+
+      <div
+        style={{
+          width: '130px',
+          flexShrink: 0,
+          fontSize: '11px',
+          color: 'var(--text-secondary)',
+          whiteSpace: 'nowrap',
+        }}
+        title={`可用/总计 ${capacityText}`}
+      >
+        {capacityText}
+      </div>
+
+      <div
+        style={{
+          flex: 1,
+          minWidth: '120px',
+          height: '4px',
+          background: 'var(--color-gray-300)',
+          borderRadius: '999px',
           overflow: 'hidden',
         }}
       >
         <div
           style={{
-            height: '100%',
             width: `${Math.min(disk.usage_percent, 100)}%`,
+            height: '100%',
             background: usageColor,
-            borderRadius: '3px',
-            transition: 'width 0.3s ease',
+            borderRadius: '999px',
+            transition: 'width 0.2s ease',
           }}
         />
       </div>
-      
-      {/* 容量信息 */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <span style={{ fontSize: '11px', color: 'var(--text-tertiary)' }}>
-          可用 {formatBytes(disk.free_space)}
-        </span>
-        <span style={{ fontSize: '12px', fontWeight: 600, color: usageColor }}>
-          {disk.usage_percent.toFixed(0)}%
-        </span>
-      </div>
+
+      <span style={{ fontSize: '11px', fontWeight: 700, color: usageColor, width: '34px', textAlign: 'right', flexShrink: 0 }}>
+        {disk.usage_percent.toFixed(0)}%
+      </span>
     </div>
   );
 };
 
-// 加载骨架屏
-const DiskSkeleton = () => (
+const DiskRowSkeleton = () => (
   <div
-    style={{
-      minWidth: '140px',
-      padding: '12px 16px',
-      background: 'var(--bg-card)',
-      borderRadius: 'var(--radius-lg)',
-      border: '1px solid var(--border-color)',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: '8px',
-    }}
     className="animate-pulse"
+    style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px',
+      padding: '10px 12px',
+      background: 'var(--bg-hover)',
+      borderRadius: 'var(--radius-sm)',
+      border: '1px solid var(--border-color)',
+    }}
   >
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-      <div style={{ width: '28px', height: '28px', borderRadius: 'var(--radius-md)', background: 'var(--color-gray-100)' }} />
-      <div>
-        <div style={{ width: '32px', height: '14px', borderRadius: '4px', background: 'var(--color-gray-100)' }} />
-        <div style={{ width: '48px', height: '10px', borderRadius: '4px', background: 'var(--color-gray-100)', marginTop: '4px' }} />
-      </div>
-    </div>
-    <div style={{ height: '6px', borderRadius: '3px', background: 'var(--color-gray-100)' }} />
-    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-      <div style={{ width: '60px', height: '12px', borderRadius: '4px', background: 'var(--color-gray-100)' }} />
-      <div style={{ width: '28px', height: '12px', borderRadius: '4px', background: 'var(--color-gray-100)' }} />
-    </div>
+    <div style={{ width: '16px', height: '16px', borderRadius: 'var(--radius-sm)', background: 'var(--color-gray-200)', flexShrink: 0 }} />
+    <div style={{ width: '30px', height: '11px', borderRadius: '4px', background: 'var(--color-gray-200)', flexShrink: 0 }} />
+    <div style={{ width: '130px', height: '11px', borderRadius: '4px', background: 'var(--color-gray-200)', flexShrink: 0 }} />
+    <div style={{ flex: 1, height: '4px', borderRadius: '999px', background: 'var(--color-gray-200)' }} />
+    <div style={{ width: '30px', height: '11px', borderRadius: '4px', background: 'var(--color-gray-200)', flexShrink: 0 }} />
   </div>
 );
 
-export default function DiskUsageBar({ disks, loading }: DiskUsageBarProps) {
-  if (loading) {
-    return (
-      <div
-        style={{
-          display: 'flex',
-          gap: '12px',
-          overflowX: 'auto',
-          paddingBottom: '4px',
-          scrollbarWidth: 'thin',
-        }}
-      >
-        {[1, 2, 3].map((i) => (
-          <DiskSkeleton key={i} />
-        ))}
-      </div>
-    );
-  }
+export default function DiskUsageBar({ disks, loading, refreshing = false, onRefresh }: DiskUsageBarProps) {
+  const [open, setOpen] = useState(false);
+  const [capsuleHover, setCapsuleHover] = useState(false);
+  const [refreshHover, setRefreshHover] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
 
-  if (!disks || disks.length === 0) {
-    return (
-      <div
-        style={{
-          padding: '16px',
-          background: 'var(--bg-card)',
-          borderRadius: 'var(--radius-lg)',
-          border: '1px solid var(--border-color)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          color: 'var(--text-tertiary)',
-        }}
-      >
-        <HardDrive style={{ width: '16px', height: '16px' }} />
-        <span style={{ fontSize: '13px' }}>无法获取磁盘信息</span>
-      </div>
-    );
-  }
+  const primaryDisk = useMemo(() => {
+    if (!disks || disks.length === 0) return null;
+    return disks.find((disk) => disk.mount_point.toUpperCase().startsWith('C')) || disks[0];
+  }, [disks]);
+
+  const summaryText = useMemo(() => {
+    if (loading) return '磁盘加载中';
+    if (!primaryDisk) return '无磁盘数据';
+    const name = getDisplayName(primaryDisk.mount_point);
+    return `${name}: ${primaryDisk.usage_percent.toFixed(0)}%`;
+  }, [loading, primaryDisk]);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (!containerRef.current) return;
+      if (event.target instanceof Node && !containerRef.current.contains(event.target)) {
+        setOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   return (
     <div
-      style={{
-        display: 'flex',
-        gap: '12px',
-        overflowX: 'auto',
-        paddingBottom: '4px',
-        scrollbarWidth: 'thin',
-      }}
+      ref={containerRef}
+      style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: '6px' }}
     >
-      {disks.map((disk) => (
-        <DiskCard key={disk.mount_point} disk={disk} />
-      ))}
+      <button
+        onClick={() => setOpen((prev) => !prev)}
+        onMouseEnter={() => setCapsuleHover(true)}
+        onMouseLeave={() => setCapsuleHover(false)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+          height: '32px',
+          padding: '0 12px',
+          borderRadius: '999px',
+          border: '1px solid var(--border-color)',
+          background: capsuleHover ? 'var(--bg-hover)' : 'var(--bg-card)',
+          color: 'var(--text-primary)',
+          cursor: 'pointer',
+          fontSize: '12px',
+          fontWeight: 600,
+          transition: 'background 0.15s ease, border-color 0.15s ease',
+        } as CSSProperties}
+        title="查看磁盘状态"
+      >
+        <PieChart style={{ width: '13px', height: '13px', color: 'var(--color-primary)' }} />
+        <span>{summaryText}</span>
+      </button>
+
+      <button
+        onClick={onRefresh}
+        onMouseEnter={() => setRefreshHover(true)}
+        onMouseLeave={() => setRefreshHover(false)}
+        disabled={!onRefresh || refreshing}
+        style={{
+          width: '32px',
+          height: '32px',
+          borderRadius: '999px',
+          border: '1px solid var(--border-color)',
+          background: refreshHover && !refreshing ? 'var(--bg-hover)' : 'var(--bg-card)',
+          color: 'var(--text-secondary)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: !onRefresh || refreshing ? 'not-allowed' : 'pointer',
+          opacity: !onRefresh || refreshing ? 0.5 : 1,
+          transition: 'background 0.15s ease, border-color 0.15s ease',
+        } as CSSProperties}
+        title="刷新磁盘状态"
+      >
+        <RefreshCw style={{ width: '13px', height: '13px' }} className={refreshing ? 'animate-spin' : ''} />
+      </button>
+
+      {open && (
+        <div
+          style={{
+            position: 'absolute',
+            right: 0,
+            top: 'calc(100% + 8px)',
+            width: '500px',
+            maxWidth: 'min(500px, calc(100vw - 40px))',
+            padding: '12px',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-color)',
+            background: 'var(--bg-card)',
+            boxShadow: 'var(--shadow-xl)',
+            zIndex: 30,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+            <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>磁盘状态</span>
+            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{disks?.length ?? 0} 个磁盘</span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {loading && [1, 2, 3].map((index) => <DiskRowSkeleton key={index} />)}
+            {!loading && (!disks || disks.length === 0) && (
+              <div
+                style={{
+                  padding: '10px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-hover)',
+                  fontSize: '12px',
+                  color: 'var(--text-tertiary)',
+                  textAlign: 'center',
+                }}
+              >
+                无法获取磁盘信息
+              </div>
+            )}
+            {!loading && disks && disks.map((disk) => (
+              <DiskRow key={disk.mount_point} disk={disk} />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
