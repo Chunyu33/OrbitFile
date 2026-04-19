@@ -241,7 +241,7 @@ export default function Settings() {
             className="card"
             style={{ 
               padding: 'var(--spacing-5)',
-              background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-dark, #1d4ed8) 100%)',
+              background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-active) 100%)',
               color: 'white',
             }}
           >

@@ -73,13 +73,43 @@ fn derive_install_location_from_icon(icon_or_uninstall: &str) -> Option<String> 
     Some(dir.to_string_lossy().to_string())
 }
 
+/// 判断文件名是否看起来像安装包/卸载器而非主程序
+/// 规则（全小写匹配）：
+/// - 显性字样：setup / install / uninstall / unins
+/// - 版本化架构后缀：_x64.exe / _x86.exe / _win64.exe / _win32.exe
+/// - 纯版本号命名：sunloginclient_11.1.1.38222_x64.exe 等
+#[cfg(windows)]
+fn is_installer_like_exe(file_name_lower: &str) -> bool {
+    if file_name_lower.contains("setup")
+        || file_name_lower.contains("install") // 同时覆盖 installer
+        || file_name_lower.contains("unins")
+    {
+        return true;
+    }
+    // 架构后缀常见于安装包
+    if file_name_lower.ends_with("_x64.exe")
+        || file_name_lower.ends_with("_x86.exe")
+        || file_name_lower.ends_with("_win64.exe")
+        || file_name_lower.ends_with("_win32.exe")
+        || file_name_lower.ends_with(".msi")
+    {
+        return true;
+    }
+    false
+}
+
 /// 判断目录是否“看起来像一个应用目录”
-/// 规则：目录下直接包含至少一个可执行文件或启动脚本
+/// 规则：
+/// - 目录下包含至少一个非安装包性质的 exe，或 bat/cmd 启动脚本
+/// - 仅包含安装包并且名称与目录不匹配的目录被识别为“残留安装文件夹”，不返回
+///   例如向日葵残留：目录 向日葵/下只有 SunloginClient_11.x_x64.exe 与 isntall 子目录
 #[cfg(windows)]
 fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
     let entries = std::fs::read_dir(dir).ok()?;
     let mut main_exe: Option<PathBuf> = None;
     let mut fallback_launcher: Option<PathBuf> = None;
+    let mut has_dll = false;
+    let mut installer_exe: Option<PathBuf> = None;
     let dir_name_lower = dir
         .file_name()
         .map(|n| n.to_string_lossy().to_lowercase())
@@ -98,28 +128,37 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
             let ext_l = ext.to_lowercase();
             match ext_l.as_str() {
                 "exe" => {
-                    // 优先命中与目录同名的 exe，作为主程序
                     let stem = path
                         .file_stem()
                         .map(|s| s.to_string_lossy().to_lowercase())
                         .unwrap_or_default();
+                    // 优先命中与目录同名的 exe，作为主程序
                     if stem == dir_name_lower || dir_name_lower.contains(&stem) {
                         return Some(path);
                     }
-                    // 跳过常见附属/卸载器
-                    if file_name_lower.contains("uninstall")
-                        || file_name_lower.contains("unins")
-                        || file_name_lower.contains("setup")
-                    {
+                    // 识别安装包、卸载器、版本化安装文件
+                    if is_installer_like_exe(&file_name_lower) {
+                        if installer_exe.is_none() {
+                            installer_exe = Some(path);
+                        }
                         continue;
                     }
                     if main_exe.is_none() {
                         main_exe = Some(path);
                     }
                 }
+                "dll" => {
+                    has_dll = true;
+                }
                 "bat" | "cmd" => {
                     if fallback_launcher.is_none() {
                         fallback_launcher = Some(path);
+                    }
+                }
+                "msi" => {
+                    // MSI 包不算主程序
+                    if installer_exe.is_none() {
+                        installer_exe = Some(path);
                     }
                 }
                 _ => {}
@@ -127,7 +166,21 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
         }
     }
 
-    main_exe.or(fallback_launcher)
+    // 正常主程序优先
+    if let Some(p) = main_exe {
+        return Some(p);
+    }
+    // 仅 bat/cmd 脚本的便携包（如 ComfyUI）——需配合 dll 或没有安装包特征才视为应用
+    if let Some(p) = fallback_launcher {
+        if has_dll || installer_exe.is_none() {
+            return Some(p);
+        }
+    }
+    // 只有安装包 exe 而没有伴随 dll——视为残留安装包，拒绝识别
+    if installer_exe.is_some() && !has_dll {
+        return None;
+    }
+    installer_exe
 }
 
 /// 路径是否属于应当跳过的系统/空目录
@@ -335,6 +388,12 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
 
                         // 仅保留可迁移应用
                         if install_location.is_empty() {
+                            continue;
+                        }
+
+                        // 幽灵条目过滤：注册表残留的路径实际已被手动删除（如 Adobe Premiere Pro 2020）
+                        // 直接验证目录存在性，避免上报不可迁移的旧条目
+                        if !Path::new(&install_location).exists() {
                             continue;
                         }
 

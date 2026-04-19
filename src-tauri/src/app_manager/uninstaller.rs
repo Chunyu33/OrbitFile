@@ -481,16 +481,16 @@ pub fn execute_cleanup(
                 continue;
             }
 
-            let delete_result = if path.is_dir() {
-                fs::remove_dir_all(&path)
-            } else {
-                fs::remove_file(&path)
-            };
-
-            if delete_result.is_ok() {
-                cleaned_count += 1;
-            } else {
-                failed_items.push(path.to_string_lossy().to_string());
+            match force_delete_path(&path) {
+                Ok(()) => cleaned_count += 1,
+                Err(err) => {
+                    eprintln!(
+                        "[orbit-file][cleanup] 强制删除失败 {} => {}",
+                        path.display(),
+                        err
+                    );
+                    failed_items.push(path.to_string_lossy().to_string());
+                }
             }
         }
 
@@ -1350,6 +1350,102 @@ fn is_blacklisted_path(path: &Path) -> bool {
     }
 
     false
+}
+
+/// 强制删除文件或目录
+///
+/// 三级回退策略：
+/// 1. 直接调用 std::fs 删除（大多数场景）
+/// 2. 递归清除只读属性后重试（覆盖 Read-only / 部分安装器设置的保护属性）
+/// 3. 调用 Windows 的 takeown / icacls 夺回所有权与完全控制权限后再次重试
+///    —— 覆盖 "Access Denied / 拒绝访问" 场景
+#[cfg(windows)]
+fn force_delete_path(path: &Path) -> Result<(), String> {
+    // 第 1 步：直接尝试
+    if try_remove(path).is_ok() {
+        return Ok(());
+    }
+
+    // 第 2 步：清除只读属性后重试
+    let _ = clear_readonly_recursively(path);
+    if let Err(err) = try_remove(path) {
+        // 第 3 步：夺权 + 授权 + 重试
+        let path_str = path.to_string_lossy().to_string();
+        if path.is_dir() {
+            let _ = run_silent("takeown", &["/F", &path_str, "/R", "/D", "Y"]);
+            // S-1-5-32-544 = BUILTIN\Administrators（避免本地化差异）
+            let _ = run_silent(
+                "icacls",
+                &[&path_str, "/grant", "*S-1-5-32-544:F", "/T", "/C", "/Q"],
+            );
+        } else {
+            let _ = run_silent("takeown", &["/F", &path_str]);
+            let _ = run_silent(
+                "icacls",
+                &[&path_str, "/grant", "*S-1-5-32-544:F", "/C", "/Q"],
+            );
+        }
+        let _ = clear_readonly_recursively(path);
+
+        if let Err(final_err) = try_remove(path) {
+            return Err(format!(
+                "删除失败：{}；权限回退后仍失败：{}",
+                err, final_err
+            ));
+        }
+    }
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn try_remove(path: &Path) -> Result<(), String> {
+    let result = if path.is_dir() {
+        fs::remove_dir_all(path)
+    } else {
+        fs::remove_file(path)
+    };
+    result.map_err(|e| e.to_string())
+}
+
+/// 递归清除只读属性；单文件也适用
+#[cfg(windows)]
+fn clear_readonly_recursively(path: &Path) -> Result<(), String> {
+    if path.is_file() {
+        return clear_readonly_single(path);
+    }
+    if path.is_dir() {
+        for entry in WalkDir::new(path).into_iter().flatten() {
+            let _ = clear_readonly_single(entry.path());
+        }
+        // 目录本身也清理一次（deny 属性常挂在目录上）
+        let _ = clear_readonly_single(path);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn clear_readonly_single(path: &Path) -> Result<(), String> {
+    let meta = fs::metadata(path).map_err(|e| e.to_string())?;
+    let mut perm = meta.permissions();
+    if perm.readonly() {
+        perm.set_readonly(false);
+        fs::set_permissions(path, perm).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 在无窗口的情况下执行一个命令行工具，忽略返回码，仅用于权限回退
+#[cfg(windows)]
+fn run_silent(program: &str, args: &[&str]) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    Command::new(program)
+        .args(args)
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(windows)]

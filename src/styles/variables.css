@@ -106,17 +106,17 @@
   --color-danger-hover: #FCA5A5;
   --color-danger-light: rgba(248, 113, 113, 0.15);
   
-  /* 中性色 - 深色模式反转 */
-  --color-gray-50: #1E293B;
-  --color-gray-100: #1E293B;
-  --color-gray-200: #334155;
-  --color-gray-300: #475569;
-  --color-gray-400: #64748B;
-  --color-gray-500: #94A3B8;
-  --color-gray-600: #CBD5E1;
-  --color-gray-700: #E2E8F0;
-  --color-gray-800: #F1F5F9;
-  --color-gray-900: #F8FAFC;
+  /* 中性色 - 深色模式反转（暖中性灰，无蓝调） */
+  --color-gray-50: #1A1F1D;
+  --color-gray-100: #1F2523;
+  --color-gray-200: #2A312E;
+  --color-gray-300: #3A423F;
+  --color-gray-400: #5C6661;
+  --color-gray-500: #7C8882;
+  --color-gray-600: #A0ACA5;
+  --color-gray-700: #C5CFCA;
+  --color-gray-800: #DFE6E2;
+  --color-gray-900: #F0F4F2;
   
   /* 背景色 - 接近纯黑的深石板色，分层明确 */
   --bg-app: #0B0F0E;           /* 深檄橄黑 - 最深层背景 */
