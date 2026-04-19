@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <!-- 主渐变 - 绿色系（Material 绿） -->
+    <linearGradient id="mainGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#66BB6A"/>
+      <stop offset="100%" style="stop-color:#2E7D32"/>
+    </linearGradient>
+    <!-- 轨道渐变 -->
+    <linearGradient id="orbitGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#81C784"/>
+      <stop offset="100%" style="stop-color:#388E3C"/>
+    </linearGradient>
+    <!-- 箭头渐变 - 浅绿白，提供清晰对比 -->
+    <linearGradient id="arrowGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#A5D6A7"/>
+      <stop offset="100%" style="stop-color:#66BB6A"/>
+    </linearGradient>
+  </defs>
+
+  <!-- 背景圆角矩形 -->
+  <rect x="32" y="32" width="448" height="448" rx="96" ry="96" fill="url(#mainGradient)"/>
+
+  <!-- 外层轨道环 -->
+  <ellipse cx="256" cy="256" rx="160" ry="160" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="24"/>
+
+  <!-- 内层轨道环 -->
+  <ellipse cx="256" cy="256" rx="100" ry="100" fill="none" stroke="rgba(255,255,255,0.15)" stroke-width="16"/>
+
+  <!-- 中心文件夹图标 -->
+  <g transform="translate(176, 180)">
+    <!-- 文件夹主体 -->
+    <path d="M0 40 L0 130 Q0 145 15 145 L145 145 Q160 145 160 130 L160 40 Q160 25 145 25 L80 25 L65 10 Q60 5 50 5 L15 5 Q0 5 0 20 Z" fill="white"/>
+    <!-- 文件夹标签 -->
+    <path d="M0 20 Q0 5 15 5 L50 5 Q60 5 65 10 L80 25 L15 25 Q0 25 0 40 Z" fill="rgba(255,255,255,0.8)"/>
+  </g>
+
+  <!-- 迁移箭头 - 右上方 -->
+  <g transform="translate(340, 100)">
+    <circle cx="30" cy="30" r="36" fill="url(#arrowGradient)"/>
+    <path d="M18 30 L42 30 M32 20 L42 30 L32 40" fill="none" stroke="white" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+
+  <!-- 轨道上的小点 - 表示数据流动 -->
+  <circle cx="416" cy="256" r="12" fill="white" opacity="0.9"/>
+  <circle cx="96" cy="256" r="8" fill="white" opacity="0.6"/>
+  <circle cx="256" cy="96" r="10" fill="white" opacity="0.7"/>
+  <circle cx="256" cy="416" r="8" fill="white" opacity="0.5"/>
+</svg>
