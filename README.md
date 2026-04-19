@@ -88,7 +88,7 @@ orbit-file/
 │   │   └── Toast.tsx            # 通知组件
 │   ├── pages/                    # 页面
 │   │   ├── AppMigration.tsx     # 应用迁移页
-│   │   ├── LargeFolders.tsx     # 大文件目录页
+│   │   ├── LargeFolders.tsx     # 数据迁移页
 │   │   ├── MigrationHistory.tsx # 迁移历史页
 │   │   └── Settings.tsx         # 设置页
 │   ├── styles/                   # 样式系统
@@ -201,7 +201,7 @@ OrbitFile 使用 Windows Win32 API 提取应用的真实图标：
 - 系统盘（C:）优先显示并高亮
 - 根据使用率显示不同颜色（绿色 < 70% < 黄色 < 90% < 红色）
 
-### 大文件目录迁移
+### 数据迁移迁移
 
 支持迁移系统文件夹和办公软件数据目录：
 

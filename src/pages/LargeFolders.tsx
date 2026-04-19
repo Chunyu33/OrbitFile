@@ -1,4 +1,4 @@
-// 大文件目录页面
+// 数据迁移页面
 // 显示系统文件夹和办公软件数据文件夹，支持迁移和恢复
 
 import { useEffect, useState, useMemo } from 'react';

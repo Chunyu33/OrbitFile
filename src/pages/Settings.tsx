@@ -564,7 +564,7 @@ export default function Settings() {
               </div>
               <div>
                 <p style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-medium)', color: 'var(--text-primary)', marginBottom: 'var(--spacing-2)' }}>
-                  工作原理
+                  迁移工作原理
                 </p>
                 <p style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-tertiary)', lineHeight: '1.6' }}>
                   OrbitFile 使用 Windows 符号链接（Symbolic Link）技术，将应用文件夹从 C 盘移动到其他磁盘，
@@ -622,7 +622,7 @@ export default function Settings() {
             </div>
           </div>
 
-          {/* 大文件目录迁移说明 */}
+          {/* 数据迁移说明 */}
           <div style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
             <div className="flex items-start" style={{ gap: 'var(--spacing-3)' }}>
               <div 
@@ -633,7 +633,7 @@ export default function Settings() {
               </div>
               <div>
                 <p style={{ fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-medium)', color: 'var(--text-primary)', marginBottom: 'var(--spacing-2)' }}>
-                  大文件目录迁移说明
+                  数据迁移说明
                 </p>
                 <div style={{ fontSize: 'var(--font-size-xs)', color: 'var(--text-tertiary)', lineHeight: '1.8' }}>
                   <p style={{ marginBottom: 'var(--spacing-2)' }}>

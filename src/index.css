@@ -10,11 +10,6 @@
   box-sizing: border-box;
 }
 
-html,
-body {
-  margin: 0;
-}
-
 html, body, #root {
   height: 100%;
 }
