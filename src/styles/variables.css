@@ -9,14 +9,16 @@
    ============================================ */
 
 /* ========== 浅色主题（默认） ========== */
+/* 调色说明：浅色主题以清新的 Material 绿（#4CAF50）作为品牌色
+   背景继续使用中性灯光灰，以避免全屏绿造成视觉疲劳 */
 :root,
 [data-theme="light"] {
-  /* 主题色 - Windows 11 品牌蓝 */
-  --color-primary: #0078D4;
-  --color-primary-hover: #106EBE;
-  --color-primary-active: #005A9E;
-  --color-primary-light: #EBF5FF;
-  --color-primary-lighter: #D6EBFF;
+  /* 主题色 - Material 绿 */
+  --color-primary: #4CAF50;
+  --color-primary-hover: #43A047;
+  --color-primary-active: #2E7D32;
+  --color-primary-light: #E8F5E9;
+  --color-primary-lighter: #F1F8E9;
   
   /* 成功色 */
   --color-success: #16A34A;
@@ -77,14 +79,16 @@
 }
 
 /* ========== 深色主题 ========== */
-/* 采用深邃的深蓝灰色调，类似 VS Code / Windows 11 设置页面 */
+/* 设计原则：底色采用深邃的接近纯黑的深石板色，
+   文字、品牌与操作元素使用亮绿（例如 #66BB6A）作为焦点色
+   效果类似终端 / 占用夜间模式的工具优雅且难以疑视 */
 [data-theme="dark"] {
-  /* 主题色 - 深色模式下稍微提亮 */
-  --color-primary: #3B9EFF;
-  --color-primary-hover: #5AADFF;
-  --color-primary-active: #2B8EEF;
-  --color-primary-light: rgba(59, 158, 255, 0.15);
-  --color-primary-lighter: rgba(59, 158, 255, 0.1);
+  /* 主题色 - 亮绿，在黑底上保持高对比度 */
+  --color-primary: #66BB6A;
+  --color-primary-hover: #81C784;
+  --color-primary-active: #4CAF50;
+  --color-primary-light: rgba(102, 187, 106, 0.18);
+  --color-primary-lighter: rgba(102, 187, 106, 0.1);
   
   /* 成功色 */
   --color-success: #34D399;
@@ -114,26 +118,26 @@
   --color-gray-800: #F1F5F9;
   --color-gray-900: #F8FAFC;
   
-  /* 背景色 - 深邃的深蓝灰色，有层次感 */
-  --bg-app: #0F172A;           /* Slate 900 - 最深层背景 */
-  --bg-card: #1E293B;          /* Slate 800 - 卡片背景 */
-  --bg-elevated: #334155;      /* Slate 700 - 悬浮层背景 */
-  --bg-hover: #334155;         /* Slate 700 - 悬停状态 */
-  --bg-active: #475569;        /* Slate 600 - 激活状态 */
-  --bg-sidebar: #1E293B;       /* Slate 800 - 侧边栏 */
-  --bg-modal: #1E293B;         /* Slate 800 - 弹窗背景 */
-  --bg-modal-overlay: rgba(0, 0, 0, 0.6);
+  /* 背景色 - 接近纯黑的深石板色，分层明确 */
+  --bg-app: #0B0F0E;           /* 深檄橄黑 - 最深层背景 */
+  --bg-card: #141A18;          /* 深森林黑 - 卡片背景 */
+  --bg-elevated: #1C2421;      /* 淺深黑 - 悬浮层背景 */
+  --bg-hover: #1C2421;         /* 悬停状态 */
+  --bg-active: #263330;        /* 激活状态 */
+  --bg-sidebar: #141A18;       /* 侧边栏 */
+  --bg-modal: #141A18;         /* 弹窗背景 */
+  --bg-modal-overlay: rgba(0, 0, 0, 0.65);
   
-  /* 文字色 - 深色模式反转 */
-  --text-primary: #F1F5F9;     /* Slate 100 */
-  --text-secondary: #CBD5E1;   /* Slate 300 */
-  --text-tertiary: #94A3B8;    /* Slate 400 */
-  --text-muted: #64748B;       /* Slate 500 */
-  --text-inverse: #0F172A;     /* Slate 900 */
+  /* 文字色 - 主文字带淡绿色调，突出品牌气质 */
+  --text-primary: #E8F5E9;     /* 浅绿白 - 主文字 */
+  --text-secondary: #B8D8BC;   /* 淡绿灰 - 次级文字 */
+  --text-tertiary: #7FA386;    /* 橄榄灰 - 辅助文字 */
+  --text-muted: #5A7560;       /* 暗橄榄 - 更弱的提示 */
+  --text-inverse: #0B0F0E;     /* 深黑 - 反色文字 */
   
   /* 边框 - 深色模式 */
-  --border-color: #334155;     /* Slate 700 */
-  --border-color-hover: #475569; /* Slate 600 */
+  --border-color: #1F2A26;     /* 深橄榄 */
+  --border-color-hover: #2F423B; /* 中橄榄 */
   --border-color-focus: var(--color-primary);
   
   /* 阴影 - 深色模式下更深 */

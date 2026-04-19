@@ -37,6 +37,15 @@ export default function AppMigration() {
   // Toast 通知
   const { toast, showToast, hideToast } = useToast();
 
+  // 打开应用所在目录，失败时通过 Toast 反馈
+  async function handleOpenFolder(app: InstalledApp) {
+    try {
+      await invoke('open_folder', { path: app.install_location });
+    } catch (error) {
+      showToast(`打开目录失败：${error}`, 'error');
+    }
+  }
+
   // 手动触发残留扫描
   async function handleScanResidue(app: InstalledApp) {
     try {
@@ -323,6 +332,7 @@ export default function AppMigration() {
             onMigrate={handleMigrate}
             onRestore={handleRestore}
             onUninstall={handleUninstall}
+            onOpenFolder={handleOpenFolder}
             uninstallingKey={uninstallingKey}
             migratedPaths={migratedPaths}
           />

@@ -11,6 +11,7 @@ interface AppListProps {
   onMigrate: (app: InstalledApp) => void;
   onRestore: (app: InstalledApp) => void;
   onUninstall: (app: InstalledApp) => void;
+  onOpenFolder?: (app: InstalledApp) => void;
   uninstallingKey?: string | null;
   migratedPaths?: string[];
 }
@@ -30,15 +31,6 @@ function getAvatarColor(name: string, isMigrated: boolean): string {
   return colors[name.charCodeAt(0) % colors.length];
 }
 
-// 打开文件夹 - 使用 Rust 后端命令
-async function openFolder(path: string) {
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('open_folder', { path });
-  } catch (error) {
-    console.error('打开文件夹失败:', error);
-  }
-}
 
 // 应用图标组件 - 显示真实图标或首字母回退
 function AppIcon({ app, isMigrated }: { app: InstalledApp; isMigrated: boolean }) {
@@ -84,6 +76,7 @@ function AppCard({
   onMigrate, 
   onRestore,
   onUninstall,
+  onOpenFolder,
   isUninstalling,
   isMigrated 
 }: { 
@@ -91,6 +84,7 @@ function AppCard({
   onMigrate: (app: InstalledApp) => void;
   onRestore: (app: InstalledApp) => void;
   onUninstall: (app: InstalledApp) => void;
+  onOpenFolder: (app: InstalledApp) => void;
   isUninstalling: boolean;
   isMigrated: boolean;
 }) {
@@ -138,7 +132,7 @@ function AppCard({
       {/* 操作按钮 */}
       <div className="flex items-center flex-shrink-0" style={{ gap: 'var(--spacing-2)' }}>
         <button
-          onClick={() => openFolder(app.install_location)}
+          onClick={() => onOpenFolder(app)}
           className="btn btn-icon btn-ghost"
           title="打开所在目录"
         >
@@ -210,7 +204,17 @@ function LoadingSkeleton() {
   );
 }
 
-export default function AppList({ apps, loading, onMigrate, onRestore, onUninstall, uninstallingKey = null, migratedPaths = [] }: AppListProps) {
+export default function AppList({ apps, loading, onMigrate, onRestore, onUninstall, onOpenFolder, uninstallingKey = null, migratedPaths = [] }: AppListProps) {
+  // 默认的打开目录实现（无外部回调时）
+  const defaultOpenFolder = async (app: InstalledApp) => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      await invoke('open_folder', { path: app.install_location });
+    } catch (error) {
+      console.error('打开文件夹失败:', error);
+    }
+  };
+  const handleOpenFolder = onOpenFolder ?? defaultOpenFolder;
   const [searchQuery, setSearchQuery] = useState('');
 
   // 检查应用是否已迁移
@@ -298,6 +302,7 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
                 onMigrate={onMigrate}
                 onRestore={onRestore}
                 onUninstall={onUninstall}
+                onOpenFolder={handleOpenFolder}
                 isUninstalling={uninstallingKey === `${app.display_name}|${app.registry_path}`}
                 isMigrated={isAppMigrated(app)}
               />
