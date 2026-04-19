@@ -1,8 +1,12 @@
 {
   "name": "orbit-file",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
+  "author": {
+    "email": "liucygm33@gmail.com",
+    "name": "Evan Lau"
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
