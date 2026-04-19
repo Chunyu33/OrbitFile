@@ -5,6 +5,23 @@ import { Package, Search, CheckCircle2, FolderOpen, Link2 } from 'lucide-react';
 import { InstalledApp } from '../types';
 import { useState, useMemo } from 'react';
 
+// 迁移状态筛选选项
+type MigrationFilter = 'all' | 'migrated' | 'not_migrated';
+// 盘符筛选选项
+type DriveFilter = 'all' | 'c' | 'other';
+
+// 从应用列表中提取所有盘符（高性能：仅遍历已加载的 apps，不调用系统 API）
+function extractDriveLetters(apps: InstalledApp[]): string[] {
+  const drives = new Set<string>();
+  for (const app of apps) {
+    const match = app.install_location.match(/^([A-Za-z]):/i);
+    if (match) {
+      drives.add(match[1].toUpperCase());
+    }
+  }
+  return Array.from(drives).sort();
+}
+
 interface AppListProps {
   apps: InstalledApp[];
   loading: boolean;
@@ -216,6 +233,8 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
   };
   const handleOpenFolder = onOpenFolder ?? defaultOpenFolder;
   const [searchQuery, setSearchQuery] = useState('');
+  const [migrationFilter, setMigrationFilter] = useState<MigrationFilter>('all');
+  const [driveFilter, setDriveFilter] = useState<DriveFilter>('all');
 
   // 检查应用是否已迁移
   const isAppMigrated = (app: InstalledApp): boolean => {
@@ -224,14 +243,35 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
     );
   };
 
+  // 提取所有盘符（用于显示“其他盘”的具体列表）
+  const availableDrives = useMemo(() => extractDriveLetters(apps), [apps]);
+  const otherDrives = useMemo(() => availableDrives.filter(d => d !== 'C'), [availableDrives]);
+
   const filteredApps = useMemo(() => {
-    if (!searchQuery.trim()) return apps;
-    const query = searchQuery.toLowerCase();
-    return apps.filter(app => 
-      app.display_name.toLowerCase().includes(query) ||
-      app.install_location.toLowerCase().includes(query)
-    );
-  }, [apps, searchQuery]);
+    return apps.filter(app => {
+      // 搜索关键词过滤
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        if (!app.display_name.toLowerCase().includes(query) &&
+            !app.install_location.toLowerCase().includes(query)) {
+          return false;
+        }
+      }
+      // 迁移状态过滤
+      if (migrationFilter !== 'all') {
+        const migrated = isAppMigrated(app);
+        if (migrationFilter === 'migrated' && !migrated) return false;
+        if (migrationFilter === 'not_migrated' && migrated) return false;
+      }
+      // 盘符过滤
+      if (driveFilter !== 'all') {
+        const driveLetter = app.install_location.charAt(0).toUpperCase();
+        if (driveFilter === 'c' && driveLetter !== 'C') return false;
+        if (driveFilter === 'other' && driveLetter === 'C') return false;
+      }
+      return true;
+    });
+  }, [apps, searchQuery, migrationFilter, driveFilter, migratedPaths]);
 
   if (loading) {
     return (
@@ -257,37 +297,81 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
     );
   }
 
+  // 下拉选择框样式
+  const selectStyle: React.CSSProperties = {
+    appearance: 'none',
+    background: 'var(--bg-card)',
+    border: '1px solid var(--border-color)',
+    borderRadius: 'var(--radius-md)',
+    padding: '6px 28px 6px 10px',
+    fontSize: 'var(--font-size-xs)',
+    color: 'var(--text-primary)',
+    cursor: 'pointer',
+    minWidth: '90px',
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236B7280' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")`,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 8px center',
+  };
+
   return (
     <div className="h-full flex flex-col">
-      {/* 搜索栏 */}
-      <div className="flex items-center" style={{ gap: 'var(--spacing-3)', marginBottom: 'var(--spacing-4)' }}>
-        <div className="relative flex-1">
+      {/* 搜索栏与筛选器 */}
+      <div className="flex items-center" style={{ gap: 'var(--spacing-2)', marginBottom: 'var(--spacing-4)' }}>
+        {/* 搜索框 */}
+        <div className="relative" style={{ flex: '1 1 auto', minWidth: 0 }}>
           <Search 
             className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4" 
             style={{ color: 'var(--text-muted)' }}
           />
           <input
             type="text"
-            placeholder="搜索应用名称或路径..."
+            placeholder="搜索应用..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="input"
-            style={{ paddingLeft: 'var(--spacing-10)' }}
+            style={{ paddingLeft: 'var(--spacing-10)', width: '100%' }}
           />
         </div>
+
+        {/* 迁移状态筛选 */}
+        <select
+          value={migrationFilter}
+          onChange={(e) => setMigrationFilter(e.target.value as MigrationFilter)}
+          style={selectStyle}
+          title="按迁移状态筛选"
+        >
+          <option value="all">全部状态</option>
+          <option value="migrated">已迁移</option>
+          <option value="not_migrated">未迁移</option>
+        </select>
+
+        {/* 盘符筛选 */}
+        <select
+          value={driveFilter}
+          onChange={(e) => setDriveFilter(e.target.value as DriveFilter)}
+          style={selectStyle}
+          title="按安装盘符筛选"
+        >
+          <option value="all">全部盘</option>
+          <option value="c">C 盘</option>
+          <option value="other">其他盘{otherDrives.length > 0 ? ` (${otherDrives.join('/')})` : ''}</option>
+        </select>
+
+        {/* 应用计数 */}
         <div 
           className="flex items-center flex-shrink-0"
           style={{ 
-            gap: 'var(--spacing-2)', 
-            padding: 'var(--spacing-2) var(--spacing-4)',
+            gap: 'var(--spacing-1)', 
+            padding: '6px 10px',
             background: 'var(--color-gray-100)',
-            borderRadius: 'var(--radius-md)'
+            borderRadius: 'var(--radius-md)',
+            whiteSpace: 'nowrap',
           }}
         >
           <span style={{ color: 'var(--text-primary)', fontSize: 'var(--font-size-sm)', fontWeight: 'var(--font-weight-semibold)' }}>
             {filteredApps.length}
           </span>
-          <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--font-size-xs)' }}>个应用</span>
+          <span style={{ color: 'var(--text-tertiary)', fontSize: 'var(--font-size-xs)' }}>个</span>
         </div>
       </div>
 

@@ -5,6 +5,8 @@
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
+import { getVersion } from '@tauri-apps/api/app';
+import AppIconSvg from '../assets/icon.svg';
 import { 
   FolderCog, Shield, CheckCircle, ChevronRight, User, Mail, Info, 
   AlertTriangle, Lightbulb, FolderArchive, Trash2, 
@@ -38,10 +40,9 @@ function formatSize(bytes: number): string {
   return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
-// 应用配置信息
+// 应用配置信息（版本号将动态获取）
 const APP_INFO = {
   name: 'OrbitFile',
-  version: '1.0.0',
   description: '专业的 Windows 应用管理、存储重定向工具',
   author: 'Evan Lau',
   email: 'liucygm33@gmail.com',
@@ -163,15 +164,18 @@ export default function Settings() {
   const [stats, setStats] = useState<MigrationStats | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [cleanResult, setCleanResult] = useState<CleanupResult | null>(null);
+  const [appVersion, setAppVersion] = useState('...');
   const currentYear = new Date().getFullYear();
   
   // 获取主题状态
   const themeState = useThemeContext();
 
-  // 加载设置和统计信息
+  // 加载设置、统计信息和版本号
   useEffect(() => {
     setSettings(loadSettings());
     loadStats();
+    // 动态获取版本号
+    getVersion().then(setAppVersion).catch(() => setAppVersion('1.0.0'));
   }, []);
 
   // 加载迁移统计信息
@@ -735,17 +739,17 @@ export default function Settings() {
           <div className="setting-item" style={{ padding: 'var(--spacing-4) var(--spacing-5)', margin: 0, borderBottom: '1px solid var(--border-color)' }}>
             <div className="flex items-center" style={{ gap: 'var(--spacing-3)' }}>
               <div 
-                className="w-9 h-9 rounded-lg flex items-center justify-center"
+                className="w-9 h-9 rounded-lg flex items-center justify-center overflow-hidden"
                 style={{ background: 'var(--color-primary)' }}
               >
-                <span style={{ color: 'white', fontWeight: 'var(--font-weight-bold)', fontSize: 'var(--font-size-sm)' }}>O</span>
+                <img src={AppIconSvg} alt="OrbitFile" className="w-9 h-9" />
               </div>
               <div>
                 <p className="setting-label">{APP_INFO.name}</p>
                 <p className="setting-desc">{APP_INFO.description}</p>
               </div>
             </div>
-            <span className="badge badge-primary">v{APP_INFO.version}</span>
+            <span className="badge badge-primary">v{appVersion}</span>
           </div>
 
           {/* 动态渲染关于信息列表 */}

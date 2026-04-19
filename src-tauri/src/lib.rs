@@ -1197,19 +1197,37 @@ fn load_history() -> HistoryStorage {
 
 /// 保存历史记录
 /// 将记录列表写入 JSON 文件
+///
+/// 采用原子写入策略：先写入临时文件，再重命名覆盖目标文件
+/// 这样即使写入过程中断电/崩溃，也不会损坏原有数据
 fn save_history(storage: &HistoryStorage) -> Result<(), String> {
     let path = get_history_file_path();
+    let temp_path = path.with_extension("json.tmp");
+    let backup_path = path.with_extension("json.bak");
     
     // 序列化为格式化的 JSON（便于人工查看）
     let json = serde_json::to_string_pretty(storage)
         .map_err(|e| format!("序列化历史记录失败: {}", e))?;
     
-    // 写入文件
-    let mut file = fs::File::create(&path)
-        .map_err(|e| format!("创建历史文件失败: {}", e))?;
+    // 1. 写入临时文件
+    let mut file = fs::File::create(&temp_path)
+        .map_err(|e| format!("创建临时文件失败: {}", e))?;
     
     file.write_all(json.as_bytes())
-        .map_err(|e| format!("写入历史文件失败: {}", e))?;
+        .map_err(|e| format!("写入临时文件失败: {}", e))?;
+    
+    // 确保数据刷盘
+    file.sync_all()
+        .map_err(|e| format!("同步临时文件失败: {}", e))?;
+    
+    // 2. 备份旧文件（如果存在）
+    if path.exists() {
+        let _ = fs::copy(&path, &backup_path); // 备份失败不阻塞主流程
+    }
+    
+    // 3. 原子重命名：临时文件 -> 目标文件
+    fs::rename(&temp_path, &path)
+        .map_err(|e| format!("重命名历史文件失败: {}", e))?;
     
     Ok(())
 }
