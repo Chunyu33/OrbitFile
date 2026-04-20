@@ -1,357 +1,52 @@
 /* ============================================
-   OrbitFile 设计系统 - 通用组件样式
+   OrbitFile - 精简组件样式
+   大部分样式已迁移到 Tailwind
    ============================================ */
 
-/* ========== 按钮组件 ========== */
-.btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--spacing-2);
-  padding: var(--spacing-2) var(--spacing-4);
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
-  line-height: var(--line-height-tight);
-  border-radius: var(--radius-md);
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: all var(--transition-fast);
-  white-space: nowrap;
-}
+/* 进度条渐变 */
+.progress-fill-safe { background: linear-gradient(90deg, #16A34A, #22C55E); }
+.progress-fill-warning { background: linear-gradient(90deg, #EA580C, #F97316); }
+.progress-fill-danger { background: linear-gradient(90deg, #DC2626, #EF4444); }
 
-.btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* 主要按钮 */
-.btn-primary {
-  background: var(--color-primary);
-  color: var(--text-inverse);
-  border-color: var(--color-primary);
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--color-primary-hover);
-  border-color: var(--color-primary-hover);
-}
-
-.btn-primary:active:not(:disabled) {
-  background: var(--color-primary-active);
-}
-
-/* 次要按钮 */
-.btn-secondary {
-  background: var(--bg-card);
-  color: var(--text-primary);
-  border-color: var(--border-color);
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: var(--bg-hover);
-  border-color: var(--border-color-hover);
-}
-
-/* 成功按钮 */
-.btn-success {
-  background: var(--color-success);
-  color: var(--text-inverse);
-  border-color: var(--color-success);
-}
-
-.btn-success:hover:not(:disabled) {
-  background: var(--color-success-hover);
-}
-
-/* 幽灵按钮 */
-.btn-ghost {
-  background: transparent;
-  color: var(--text-secondary);
-  border-color: transparent;
-}
-
-.btn-ghost:hover:not(:disabled) {
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-/* 图标按钮 */
-.btn-icon {
-  padding: var(--spacing-2);
-  width: 32px;
-  height: 32px;
-}
-
-/* ========== 卡片组件 ========== */
-.card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  padding: var(--card-padding);
-}
-
-.card-hover:hover {
-  border-color: var(--border-color-hover);
-  box-shadow: var(--shadow-md);
-}
-
-/* ========== 输入框组件 ========== */
-.input {
-  width: 100%;
-  padding: var(--spacing-2) var(--spacing-3);
-  font-size: var(--font-size-sm);
-  color: var(--text-primary);
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
-}
-
-.input:hover {
-  border-color: var(--border-color-hover);
-}
-
-.input:focus {
-  outline: none;
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 3px var(--color-primary-lighter);
-}
-
-.input::placeholder {
-  color: var(--text-muted);
-}
-
-/* ========== 徽章组件 ========== */
-.badge {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--spacing-1);
-  padding: 2px var(--spacing-2);
-  font-size: var(--font-size-xs);
-  font-weight: var(--font-weight-medium);
-  border-radius: var(--radius-full);
-}
-
-.badge-success {
-  background: var(--color-success-lighter);
-  color: var(--color-success);
-}
-
-.badge-primary {
-  background: var(--color-primary-lighter);
-  color: var(--color-primary);
-}
-
-.badge-warning {
-  background: var(--color-warning-light);
-  color: var(--color-warning);
-}
-
-/* ========== 页面标题 ========== */
-.page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--spacing-6);
-}
-
-.page-title {
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-primary);
-  margin: 0;
-}
-
-.page-subtitle {
-  font-size: var(--font-size-sm);
-  color: var(--text-tertiary);
-  margin-top: var(--spacing-1);
-}
-
-/* ========== 空状态 ========== */
-.empty-state {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: var(--spacing-16) var(--spacing-6);
-  text-align: center;
-}
-
-.empty-state-icon {
-  width: 64px;
-  height: 64px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: var(--color-gray-100);
-  border-radius: var(--radius-xl);
-  margin-bottom: var(--spacing-4);
-  color: var(--text-muted);
-}
-
-.empty-state-title {
-  font-size: var(--font-size-lg);
-  font-weight: var(--font-weight-semibold);
-  color: var(--text-primary);
-  margin-bottom: var(--spacing-2);
-}
-
-.empty-state-desc {
-  font-size: var(--font-size-sm);
-  color: var(--text-tertiary);
-}
-
-/* ========== 统计卡片 ========== */
-.stat-card {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-4);
-  padding: var(--spacing-4);
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-}
-
-.stat-icon {
-  width: 48px;
-  height: 48px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-lg);
-}
-
-.stat-icon-primary {
-  background: var(--color-primary-light);
-  color: var(--color-primary);
-}
-
-.stat-icon-success {
-  background: var(--color-success-light);
-  color: var(--color-success);
-}
-
-.stat-value {
-  font-size: var(--font-size-2xl);
-  font-weight: var(--font-weight-bold);
-  color: var(--text-primary);
-  line-height: 1;
-}
-
-.stat-label {
-  font-size: var(--font-size-sm);
-  color: var(--text-tertiary);
-  margin-top: var(--spacing-1);
-}
-
-/* ========== 列表项 ========== */
-.list-item {
-  display: flex;
-  align-items: center;
-  gap: var(--spacing-4);
-  padding: var(--spacing-4);
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg);
-  transition: all var(--transition-fast);
-}
-
-.list-item:hover {
-  border-color: var(--border-color-hover);
-  box-shadow: var(--shadow-sm);
-}
-
-.list-item-migrated {
-  border-left: 3px solid var(--color-success);
-  background: linear-gradient(90deg, var(--color-success-light) 0%, var(--bg-card) 100%);
-}
-
-/* ========== 进度条 ========== */
-.progress-bar {
-  height: 8px;
-  background: var(--color-gray-200);
-  border-radius: var(--radius-full);
-  overflow: hidden;
-}
-
-.progress-fill {
-  height: 100%;
-  border-radius: var(--radius-full);
-  transition: width var(--transition-slow);
-}
-
-.progress-fill-safe {
-  background: linear-gradient(90deg, #16A34A, #22C55E);
-}
-
-.progress-fill-warning {
-  background: linear-gradient(90deg, #EA580C, #F97316);
-}
-
-.progress-fill-danger {
-  background: linear-gradient(90deg, #DC2626, #EF4444);
-}
-
-/* ========== 分割线 ========== */
-.divider {
-  height: 1px;
-  background: var(--border-color);
-  margin: var(--spacing-4) 0;
-}
-
-/* ========== 设置项 ========== */
+/* 设置行布局 */
 .setting-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--spacing-4) 0;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.setting-item:last-child {
-  border-bottom: none;
+  gap: 12px;
 }
 
 .setting-label {
-  font-size: var(--font-size-sm);
-  font-weight: var(--font-weight-medium);
+  font-size: 13px;
+  font-weight: 500;
   color: var(--text-primary);
+  margin: 0;
 }
 
 .setting-desc {
-  font-size: var(--font-size-xs);
+  font-size: 11px;
   color: var(--text-tertiary);
-  margin-top: var(--spacing-1);
+  margin: 2px 0 0 0;
 }
 
-/* ========== 开关组件 ========== */
-.toggle {
-  position: relative;
-  width: 44px;
-  height: 24px;
-  background: var(--color-gray-300);
-  border-radius: var(--radius-full);
-  cursor: pointer;
-  transition: background var(--transition-fast);
+/* 标签徽章 */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 
-.toggle.active {
-  background: var(--color-primary);
+.badge-primary {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
 }
 
-.toggle-knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 20px;
-  height: 20px;
-  background: white;
-  border-radius: var(--radius-full);
-  box-shadow: var(--shadow-sm);
-  transition: transform var(--transition-fast);
-}
-
-.toggle.active .toggle-knob {
-  transform: translateX(20px);
+.badge-success {
+  background: var(--color-success-light, rgba(22, 163, 74, 0.12));
+  color: var(--color-success);
 }

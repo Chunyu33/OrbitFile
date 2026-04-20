@@ -4,6 +4,7 @@
 /* 导入设计系统 */
 @import "./styles/variables.css";
 @import "./styles/components.css";
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
 /* 全局样式重置 */
 *, *::before, *::after {
@@ -46,24 +47,26 @@ body {
   background: var(--color-gray-400);
 }
 
-/* 按钮基础样式 */
-button {
-  cursor: pointer;
-  border: none;
-  outline: none;
-  background: none;
-  font-family: inherit;
-  transition: all var(--transition-fast);
-}
+/* 按钮基础样式 - 放入 @layer base 让 Tailwind utilities 可以正常覆盖 */
+@layer base {
+  button {
+    cursor: pointer;
+    border: none;
+    outline: none;
+    background: none;
+    font-family: inherit;
+    transition: all var(--transition-fast);
+  }
 
-button:disabled {
-  cursor: not-allowed;
-  opacity: 0.4;
-}
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.4;
+  }
 
-button:focus-visible {
-  outline: 2px solid var(--color-primary);
-  outline-offset: 2px;
+  button:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
 }
 
 /* 输入框基础样式 */

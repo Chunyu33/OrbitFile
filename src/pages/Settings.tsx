@@ -91,30 +91,16 @@ function Toggle({ active, onChange }: { active: boolean; onChange: () => void })
   return (
     <button
       onClick={onChange}
-      className={`toggle ${active ? 'active' : ''}`}
+      className="relative flex-shrink-0 rounded-full border-none cursor-pointer transition-colors duration-150"
       style={{
-        width: '44px',
-        height: '24px',
+        width: '40px',
+        height: '22px',
         background: active ? 'var(--color-primary)' : 'var(--color-gray-300)',
-        borderRadius: 'var(--radius-full)',
-        position: 'relative',
-        transition: 'background var(--transition-fast)',
-        border: 'none',
-        cursor: 'pointer',
       }}
     >
       <span
-        style={{
-          position: 'absolute',
-          top: '2px',
-          left: active ? '22px' : '2px',
-          width: '20px',
-          height: '20px',
-          background: 'white',
-          borderRadius: 'var(--radius-full)',
-          boxShadow: 'var(--shadow-sm)',
-          transition: 'left var(--transition-fast)',
-        }}
+        className="absolute top-0.5 w-[18px] h-[18px] bg-white rounded-full shadow-sm transition-all duration-150"
+        style={{ left: active ? '20px' : '2px' }}
       />
     </button>
   );
@@ -139,20 +125,7 @@ function ThemeButton({
     <button
       onClick={onClick}
       title={label}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: '36px',
-        height: '28px',
-        borderRadius: 'var(--radius-md)',
-        border: 'none',
-        cursor: 'pointer',
-        background: isActive ? 'var(--bg-card)' : 'transparent',
-        color: isActive ? 'var(--color-primary)' : 'var(--text-muted)',
-        boxShadow: isActive ? 'var(--shadow-sm)' : 'none',
-        transition: 'all var(--transition-fast)',
-      }}
+      className={`flex items-center justify-center w-9 h-7 rounded-md border-none cursor-pointer transition-all duration-150 ${isActive ? 'bg-[var(--bg-card)] text-[var(--color-primary)] shadow-sm' : 'bg-transparent text-[var(--text-muted)] hover:text-[var(--text-primary)]'}`}
     >
       {icon}
     </button>
@@ -231,22 +204,16 @@ export default function Settings() {
   };
 
   return (
-    <div className="h-full overflow-auto" style={{ padding: 'var(--page-padding)' }}>
-      <div className="max-w-3xl mx-auto" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--spacing-6)' }}>
-        {/* 标题 */}
-        <header>
-          <h1 className="page-title">设置</h1>
-          <p className="page-subtitle">配置应用迁移选项和偏好</p>
-        </header>
+    <div className="h-full overflow-auto px-5 py-5">
+      <div className="max-w-3xl mx-auto flex flex-col gap-5">
 
         {/* 已节省空间统计卡片 */}
         {stats && stats.active_migrations > 0 && (
-          <section 
-            className="card"
+          <section
+            className="rounded-lg overflow-hidden text-white"
             style={{ 
               padding: 'var(--spacing-5)',
               background: 'linear-gradient(135deg, var(--color-primary) 0%, var(--color-primary-active) 100%)',
-              color: 'white',
             }}
           >
             <div className="flex items-center justify-between">
@@ -297,7 +264,7 @@ export default function Settings() {
         )}
 
         {/* 外观设置 - 主题切换 */}
-        <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] overflow-hidden">
           <div 
             style={{ 
               padding: 'var(--spacing-3) var(--spacing-5)',
@@ -368,7 +335,7 @@ export default function Settings() {
         </section>
 
         {/* 迁移设置 */}
-        <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] overflow-hidden">
           <div 
             style={{ 
               padding: 'var(--spacing-3) var(--spacing-5)',
@@ -456,7 +423,7 @@ export default function Settings() {
         </section>
 
         {/* 存储维护 */}
-        <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] overflow-hidden">
           <div 
             style={{ 
               padding: 'var(--spacing-3) var(--spacing-5)',
@@ -541,7 +508,7 @@ export default function Settings() {
         </section>
 
         {/* 使用说明 */}
-        <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] overflow-hidden">
           <div 
             style={{ 
               padding: 'var(--spacing-3) var(--spacing-5)',
@@ -719,7 +686,7 @@ export default function Settings() {
         </section>
 
         {/* 关于 */}
-        <section className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] overflow-hidden">
           <div 
             style={{ 
               padding: 'var(--spacing-3) var(--spacing-5)',

@@ -5,8 +5,9 @@
 import { useEffect, useState, createContext, useContext } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import TitleBar from './components/TitleBar';
-import TabBar from './components/TabBar';
+import ModernTabBar from './components/ModernTabBar';
 import DiskUsageBar from './components/DiskUsageBar';
+import PageTransition from './components/PageTransition';
 import AppMigration from './pages/AppMigration';
 import LargeFolders from './pages/LargeFolders';
 import MigrationHistory from './pages/MigrationHistory';
@@ -88,7 +89,7 @@ function App() {
         <TitleBar />
 
         {/* Tab 导航栏 */}
-        <TabBar
+        <ModernTabBar
           activeTab={activeTab}
           onTabChange={setActiveTab}
           rightSlot={(
@@ -103,7 +104,9 @@ function App() {
 
         {/* 页面内容区域 */}
         <main className="flex-1 overflow-hidden" style={{ background: 'var(--bg-card)' }}>
-          {renderContent()}
+          <PageTransition pageKey={activeTab} className="h-full">
+            {renderContent()}
+          </PageTransition>
         </main>
       </div>
     </ThemeContext.Provider>

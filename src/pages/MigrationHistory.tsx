@@ -50,148 +50,91 @@ function shortenPath(path: string): string {
   return `${parts[0]}\\...\\${parts.slice(-2).join('\\')}`;
 }
 
-// 历史记录行组件（紧凑水平布局）
-// 
-// 布局结构：[图标] [名称+类型] [路径: 原 → 目标] [状态图标] [大小] [恢复按钮]
-// 使用 flex 布局，各部分通过 flex-shrink-0 或 min-w-0 控制伸缩
+// 历史记录行组件
 function HistoryRow({ 
   record, 
   onRestore, 
   isRestoring,
   linkStatus,
+  isLast,
 }: { 
   record: MigrationRecord; 
   onRestore: (id: string, recordType: string) => void;
   isRestoring: boolean;
   linkStatus: LinkStatus;
+  isLast: boolean;
 }) {
-  // 判断记录类型（兼容旧数据，默认为 App）
   const isLargeFolder = record.record_type === 'LargeFolder';
-  const iconBgColor = isLargeFolder ? 'var(--color-warning)' : 'var(--color-primary)';
-  
+
   return (
-    <div 
-      className="flex items-center"
-      style={{ 
-        padding: '12px 16px',
-        background: 'var(--bg-card)',
-        borderRadius: 'var(--radius-md)',
-        border: '1px solid var(--border-color)',
-        gap: '12px',
-        // 链接损坏时显示警告边框
-        borderColor: linkStatus === 'broken' ? 'var(--color-danger)' : 'var(--border-color)',
-      }}
-    >
-      {/* 图标 - 固定宽度 */}
-      <div 
-        className="flex-shrink-0 flex items-center justify-center"
-        style={{ 
-          width: '32px',
-          height: '32px',
-          borderRadius: 'var(--radius-md)',
-          background: iconBgColor,
-        }}
-      >
-        {isLargeFolder ? (
-          <FolderArchive className="w-4 h-4" style={{ color: 'white' }} />
-        ) : (
-          <AppWindow className="w-4 h-4" style={{ color: 'white' }} />
-        )}
+    <div className={`
+      group relative rounded-xl border bg-[var(--bg-card)] px-4 py-3
+      transition-all duration-200 hover:-translate-y-[1px]
+      ${linkStatus === 'broken'
+        ? 'border-red-200 bg-red-50/50 dark:bg-red-900/10'
+        : 'border-[var(--border-color)] hover:border-[var(--border-color-hover)]'
+      }
+      ${!isLast ? '' : ''}
+    `}>
+      <div className="flex items-center gap-3">
+      {/* 图标 */}
+      <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center text-white shadow-sm ${isLargeFolder ? 'bg-amber-500' : 'bg-[var(--color-primary)]'}`}>
+        {isLargeFolder
+          ? <FolderArchive className="w-4 h-4" />
+          : <AppWindow className="w-4 h-4" />
+        }
       </div>
 
-      {/* 名称和类型 - 固定宽度 */}
-      <div className="flex-shrink-0" style={{ width: '120px' }}>
-        <div className="flex items-center" style={{ gap: '6px' }}>
-          <span 
-            className="truncate"
-            style={{ 
-              fontSize: '13px', 
-              fontWeight: 600, 
-              color: 'var(--text-primary)',
-              maxWidth: '80px',
-            }}
-            title={record.app_name}
-          >
+      {/* 名称 + 类型 + 日期 */}
+      <div className="flex-shrink-0 w-32">
+        <div className="flex items-center gap-1.5">
+          <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate max-w-[90px]" title={record.app_name}>
             {record.app_name}
           </span>
-          <span 
-            style={{ 
-              fontSize: '10px', 
-              padding: '1px 4px', 
-              borderRadius: '3px',
-              background: isLargeFolder ? 'var(--color-warning-light)' : 'var(--color-primary-light)',
-              color: isLargeFolder ? 'var(--color-warning)' : 'var(--color-primary)',
-              flexShrink: 0,
-            }}
-          >
+          <span className={`inline-block px-1.5 py-0.5 text-[10px] font-medium rounded-full flex-shrink-0 ${isLargeFolder ? 'bg-amber-500/10 text-amber-600' : 'bg-[var(--color-primary-light)] text-[var(--color-primary)]'}`}>
             {isLargeFolder ? '文件夹' : '应用'}
           </span>
         </div>
-        <p style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
-          {formatDate(record.migrated_at)}
-        </p>
+        <p className="text-[11px] text-[var(--text-muted)] mt-0.5">{formatDate(record.migrated_at)}</p>
       </div>
 
-      {/* 路径信息 - 弹性宽度，单行显示 */}
-      <div 
-        className="flex-1 min-w-0 flex items-center"
-        style={{ gap: '6px', fontSize: '12px', color: 'var(--text-tertiary)' }}
-      >
-        <span 
-          className="truncate" 
-          style={{ maxWidth: '40%' }}
-          title={record.original_path}
-        >
+      {/* 路径 */}
+      <div className="flex-1 min-w-0 flex items-center gap-2 text-[11px] text-[var(--text-tertiary)]">
+        <span className="truncate px-2 py-1 rounded-md bg-[var(--bg-hover)]/70" style={{ maxWidth: '40%' }} title={record.original_path}>
           {shortenPath(record.original_path)}
         </span>
-        <ArrowRight className="w-3 h-3 flex-shrink-0" style={{ color: 'var(--color-success)' }} />
-        <span 
-          className="truncate"
-          style={{ maxWidth: '40%' }}
-          title={record.target_path}
-        >
+        <ArrowRight className="w-3.5 h-3.5 flex-shrink-0 text-emerald-500" />
+        <span className="truncate px-2 py-1 rounded-md bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" style={{ maxWidth: '40%' }} title={record.target_path}>
           {shortenPath(record.target_path)}
         </span>
       </div>
 
-      {/* 健康状态图标 */}
-      <div className="flex-shrink-0" style={{ width: '20px' }} title={
-        linkStatus === 'healthy' ? '链接正常' : 
-        linkStatus === 'broken' ? '目标路径不存在' : ''
-      }>
-        {linkStatus === 'checking' && (
-          <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--text-muted)' }} />
-        )}
-        {linkStatus === 'healthy' && (
-          <CheckCircle2 className="w-4 h-4" style={{ color: 'var(--color-success)' }} />
-        )}
-        {linkStatus === 'broken' && (
-          <AlertTriangle className="w-4 h-4" style={{ color: 'var(--color-danger)' }} />
-        )}
+      {/* 链接健康状态 */}
+      <div className="flex-shrink-0 w-5" title={linkStatus === 'healthy' ? '链接正常' : linkStatus === 'broken' ? '目标路径不存在' : ''}>
+        {linkStatus === 'checking' && <Loader2 className="w-4 h-4 animate-spin text-[var(--text-muted)]" />}
+        {linkStatus === 'healthy' && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
+        {linkStatus === 'broken' && <AlertTriangle className="w-4 h-4 text-red-500" />}
       </div>
 
-      {/* 大小 - 固定宽度 */}
-      <div 
-        className="flex-shrink-0 text-right"
-        style={{ width: '70px', fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}
-      >
-        {formatSize(record.size)}
+      {/* 大小 */}
+      <div className="flex-shrink-0">
+        <div className="h-7 px-2.5 rounded-full bg-[var(--bg-hover)] border border-[var(--border-color)] inline-flex items-center">
+          <span className="text-[11px] font-semibold text-[var(--text-primary)] tabular-nums">
+            {formatSize(record.size)}
+          </span>
+        </div>
       </div>
 
-      {/* 恢复按钮 - 图标按钮 */}
+      {/* 恢复按钮 */}
       <button
         onClick={() => onRestore(record.id, record.record_type || 'App')}
         disabled={isRestoring}
-        className="btn btn-icon btn-secondary flex-shrink-0"
+        className="flex-shrink-0 h-8 w-8 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] hover:bg-[var(--bg-hover)] transition-colors inline-flex items-center justify-center disabled:opacity-50"
         title="恢复到原位置"
-        style={{ width: '32px', height: '32px' }}
       >
-        {isRestoring ? (
-          <Loader2 className="w-4 h-4 animate-spin" />
-        ) : (
-          <RotateCcw className="w-4 h-4" />
-        )}
+        {isRestoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
       </button>
+      </div>
     </div>
   );
 }
@@ -199,12 +142,12 @@ function HistoryRow({
 // 空状态组件
 function EmptyState() {
   return (
-    <div className="empty-state flex-1">
-      <div className="empty-state-icon">
-        <History className="w-8 h-8" />
+    <div className="flex-1 flex flex-col items-center justify-center py-16 text-center">
+      <div className="w-14 h-14 rounded-2xl bg-[var(--bg-hover)] flex items-center justify-center mb-3 shadow-sm">
+        <History className="w-5 h-5 text-[var(--text-muted)]" />
       </div>
-      <p className="empty-state-title">暂无迁移记录</p>
-      <p className="empty-state-desc">完成应用迁移后，记录将显示在这里</p>
+      <p className="text-[14px] font-medium text-[var(--text-primary)] mb-1">暂无迁移记录</p>
+      <p className="text-[12px] text-[var(--text-tertiary)]">完成应用迁移后，记录将显示在这里</p>
     </div>
   );
 }
@@ -299,62 +242,61 @@ export default function MigrationHistory() {
   const brokenCount = Object.values(linkStatuses).filter(s => s === 'broken').length;
 
   return (
-    <div className="h-full overflow-hidden flex flex-col" style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
-      <div className="h-full max-w-6xl mx-auto flex flex-col w-full" style={{ gap: 'var(--spacing-3)' }}>
-        {/* 顶部：标题 + 统计 + 刷新按钮（紧凑单行） */}
+    <div className="h-full overflow-hidden flex flex-col px-5 py-4">
+      <div className="h-full max-w-6xl mx-auto flex flex-col w-full gap-4">
+        {/* 顶部：统计 + 刷新 */}
         <header className="flex items-center justify-between flex-shrink-0">
-          <div className="flex items-center" style={{ gap: 'var(--spacing-4)' }}>
-            <h1 style={{ fontSize: 'var(--font-size-lg)', fontWeight: 'var(--font-weight-semibold)', color: 'var(--text-primary)' }}>
-              迁移历史
-            </h1>
-            {/* 内联统计信息 */}
+          <div className="flex items-center gap-3">
             {records.length > 0 && (
-              <div className="flex items-center" style={{ gap: 'var(--spacing-3)' }}>
-                <span className="badge badge-primary">
-                  <History className="w-3 h-3" />
-                  {records.length} 项
-                </span>
-                <span className="badge badge-success">
-                  <HardDrive className="w-3 h-3" />
-                  已释放 {formatSize(totalSize)}
-                </span>
+              <>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-card)] text-[12px] shadow-sm">
+                  <History className="w-3.5 h-3.5 text-[var(--color-primary)]" />
+                  <span className="font-semibold text-[var(--text-primary)]">{records.length}</span>
+                  <span className="text-[var(--text-muted)]">项记录</span>
+                </div>
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-card)] text-[12px] shadow-sm">
+                  <HardDrive className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="font-semibold text-[var(--text-primary)]">{formatSize(totalSize)}</span>
+                  <span className="text-[var(--text-muted)]">已释放</span>
+                </div>
                 {brokenCount > 0 && (
-                  <span className="badge" style={{ background: 'var(--color-danger-light)', color: 'var(--color-danger)' }}>
-                    <AlertTriangle className="w-3 h-3" />
-                    {brokenCount} 个异常
-                  </span>
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-red-200 bg-red-50 text-[12px] text-red-600 shadow-sm dark:bg-red-900/20 dark:border-red-900/60 dark:text-red-300">
+                    <AlertTriangle className="w-3.5 h-3.5" />
+                    <span className="font-semibold">{brokenCount} 个异常</span>
+                  </div>
                 )}
-              </div>
+              </>
             )}
           </div>
           <button
             onClick={loadHistory}
             disabled={loading}
-            className="btn btn-secondary"
+            className="h-8 px-3 text-[12px] font-medium rounded-md border border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors inline-flex items-center gap-1.5 disabled:opacity-50"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
             刷新
           </button>
         </header>
 
-        {/* 内容区 - 使用单列列表布局 */}
+        {/* 内容区 */}
         {loading ? (
-          <div className="flex-1 flex flex-col items-center justify-center" style={{ gap: 'var(--spacing-3)' }}>
-            <Loader2 className="w-8 h-8 animate-spin" style={{ color: 'var(--color-primary)' }} />
-            <span style={{ fontSize: 'var(--font-size-sm)', color: 'var(--text-tertiary)' }}>加载中...</span>
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-[var(--text-tertiary)]">
+            <Loader2 className="w-6 h-6 animate-spin text-[var(--color-primary)]" />
+            <span className="text-[13px]">加载中...</span>
           </div>
         ) : records.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="flex-1 min-h-0 overflow-y-auto" style={{ paddingRight: 'var(--spacing-2)' }}>
-            <div className="flex flex-col" style={{ gap: '8px', paddingBottom: 'var(--spacing-4)' }}>
-              {records.map((record) => (
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <div className="space-y-2 pb-2">
+              {records.map((record, index) => (
                 <HistoryRow
                   key={record.id}
                   record={record}
                   onRestore={handleRestore}
                   isRestoring={restoringId === record.id}
                   linkStatus={linkStatuses[record.id] || 'unknown'}
+                  isLast={index === records.length - 1}
                 />
               ))}
             </div>

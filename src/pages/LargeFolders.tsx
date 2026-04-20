@@ -83,13 +83,6 @@ function toLargeFolder(special: SpecialFolder): LargeFolder {
   };
 }
 
-// 根据文件夹类型返回颜色
-function getFolderColor(folder: LargeFolder): string {
-  if (folder.is_junction) return 'var(--color-success)';
-  if (folder.folder_type === 'System') return 'var(--color-warning)';
-  return 'var(--color-primary)';
-}
-
 // 风险确认弹窗组件
 function RiskConfirmModal({ 
   isOpen, 
@@ -195,20 +188,17 @@ function RiskConfirmModal({
         </div>
 
         {/* 按钮 */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+        <div className="flex justify-end gap-2 mt-5">
           <button
             onClick={onCancel}
-            className="btn btn-secondary"
+            className="h-8 px-4 text-[13px] font-medium rounded-md border border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
           >
             取消
           </button>
           <button
             onClick={onConfirm}
-            className="btn"
-            style={{ 
-              background: isSystemFolder ? 'var(--color-danger)' : 'var(--color-primary)',
-              color: 'white',
-            }}
+            className="h-8 px-4 text-[13px] font-medium rounded-md text-white transition-opacity hover:opacity-90"
+            style={{ background: isSystemFolder ? '#DC2626' : 'var(--color-primary)' }}
           >
             {isSystemFolder ? '我了解风险，继续迁移' : '确认迁移'}
           </button>
@@ -218,7 +208,7 @@ function RiskConfirmModal({
   );
 }
 
-// 文件夹卡片组件
+// 文件夹行组件
 function FolderCard({ 
   folder, 
   onMigrate, 
@@ -230,141 +220,80 @@ function FolderCard({
   onRestore: (folder: LargeFolder) => void;
   onOpenFolder: (path: string) => void;
 }) {
-  const iconColor = getFolderColor(folder);
   const isSystem = folder.folder_type === 'System';
   const notFound = !folder.exists;
 
+  const iconBg = notFound
+    ? 'bg-[var(--bg-hover)]'
+    : folder.is_junction
+    ? 'bg-emerald-500/10'
+    : isSystem
+    ? 'bg-amber-500/10'
+    : 'bg-[var(--color-primary-light)]';
+
+  const iconColor = notFound
+    ? 'text-[var(--text-muted)]'
+    : folder.is_junction
+    ? 'text-emerald-600'
+    : isSystem
+    ? 'text-amber-600'
+    : 'text-[var(--color-primary)]';
+
   return (
-    <div 
-      style={{
-        background: 'var(--bg-card)',
-        borderRadius: 'var(--radius-lg)',
-        border: '1px solid var(--border-color)',
-        padding: '16px',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '16px',
-        opacity: notFound ? 0.6 : 1,
-      }}
-    >
+    <div className={`flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--bg-hover)] rounded-lg transition-colors duration-150 ${notFound ? 'opacity-50' : ''}`}>
       {/* 图标 */}
-      <div 
-        style={{
-          width: '44px',
-          height: '44px',
-          borderRadius: 'var(--radius-lg)',
-          background: notFound ? 'var(--color-gray-100)' : folder.is_junction ? 'var(--color-success-light)' : isSystem ? 'var(--color-warning-light)' : 'var(--color-primary-light)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: notFound ? 'var(--text-muted)' : iconColor,
-          flexShrink: 0,
-        }}
-      >
+      <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${iconBg} ${iconColor}`}>
         {getFolderIcon(folder.icon_id)}
       </div>
 
       {/* 信息 */}
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-          <span style={{ fontSize: '14px', fontWeight: 600, color: notFound ? 'var(--text-muted)' : 'var(--text-primary)' }}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 mb-0.5">
+          <span className="text-[13px] font-medium text-[var(--text-primary)] truncate">
             {folder.display_name}
           </span>
           {notFound && (
-            <span 
-              style={{ 
-                fontSize: '10px', 
-                padding: '2px 6px', 
-                borderRadius: '4px',
-                background: 'var(--color-gray-100)',
-                color: 'var(--text-muted)',
-                fontWeight: 500,
-              }}
-            >
+            <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded bg-[var(--bg-hover)] text-[var(--text-muted)]">
               未检测到
             </span>
           )}
           {!notFound && isSystem && !folder.is_junction && (
-            <span 
-              style={{ 
-                fontSize: '10px', 
-                padding: '2px 6px', 
-                borderRadius: '4px',
-                background: 'var(--color-warning-light)',
-                color: 'var(--color-warning)',
-                fontWeight: 500,
-              }}
-            >
+            <span className="inline-flex items-center px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-500/10 text-amber-600">
               系统文件夹
             </span>
           )}
           {folder.is_junction && (
-            <span className="badge badge-success">
-              <Link2 className="w-3 h-3" />
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-500/10 text-emerald-600">
+              <Link2 className="w-2.5 h-2.5" />
               已迁移
             </span>
           )}
         </div>
-        <p 
-          style={{ 
-            fontSize: '12px', 
-            color: 'var(--text-muted)', 
-            margin: 0,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-          title={folder.path}
-        >
-          {notFound ? `默认路径: ${folder.path}` : folder.path}
+        <p className="text-[11px] text-[var(--text-muted)] truncate" title={folder.path}>
+          {folder.is_junction && folder.junction_target
+            ? `→ ${folder.junction_target}`
+            : notFound
+            ? `默认: ${folder.path}`
+            : folder.path}
         </p>
-        {folder.is_junction && folder.junction_target && (
-          <p 
-            style={{ 
-              fontSize: '11px', 
-              color: 'var(--color-success)', 
-              margin: '4px 0 0 0',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-            }}
-            title={`实际位置: ${folder.junction_target}`}
-          >
-            → {folder.junction_target}
-          </p>
-        )}
-        {notFound && (
-          <p 
-            style={{ 
-              fontSize: '11px', 
-              color: 'var(--text-muted)', 
-              margin: '4px 0 0 0',
-              fontStyle: 'italic',
-            }}
-          >
-            可能未安装或数据存储在自定义位置
-          </p>
-        )}
       </div>
 
       {/* 大小 */}
-      <div style={{ textAlign: 'right', minWidth: '80px', flexShrink: 0 }}>
-        <div style={{ fontSize: '14px', fontWeight: 600, color: notFound ? 'var(--text-muted)' : 'var(--text-primary)' }}>
-          {notFound ? '—' : folder.is_junction ? '已迁移' : formatSize(folder.size)}
-        </div>
+      <div className="flex-shrink-0 text-right w-20">
+        <span className="text-[13px] font-semibold text-[var(--text-primary)] tabular-nums">
+          {notFound ? '—' : folder.is_junction ? '—' : formatSize(folder.size)}
+        </span>
         {!notFound && !folder.is_junction && folder.size > 0 && (
-          <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            可释放
-          </div>
+          <div className="text-[10px] text-[var(--text-muted)]">可释放</div>
         )}
       </div>
 
       {/* 操作按钮 */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
         {!notFound && (
           <button
             onClick={() => onOpenFolder(folder.path)}
-            className="btn btn-icon btn-ghost"
+            className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)] transition-colors"
             title="打开文件夹"
           >
             <FolderOpen className="w-4 h-4" />
@@ -372,28 +301,23 @@ function FolderCard({
         )}
 
         {notFound ? (
-          <button
-            className="btn btn-secondary"
-            style={{ minWidth: '80px' }}
-            disabled
-          >
+          <button disabled className="h-7 px-3 text-[12px] font-medium rounded-md border border-[var(--border-color)] text-[var(--text-muted)] opacity-40 cursor-not-allowed">
             不可用
           </button>
         ) : folder.is_junction ? (
           <button
             onClick={() => onRestore(folder)}
-            className="btn btn-secondary"
-            style={{ minWidth: '80px' }}
+            className="h-7 px-3 text-[12px] font-medium rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] transition-colors inline-flex items-center gap-1.5"
           >
-            <Undo2 className="w-4 h-4" />
+            <Undo2 className="w-3.5 h-3.5" />
             恢复
           </button>
         ) : (
           <button
             onClick={() => onMigrate(folder)}
-            className="btn btn-primary"
-            style={{ minWidth: '80px' }}
             disabled={folder.size === 0}
+            className="h-7 px-3 text-[12px] font-semibold rounded-md text-white hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed"
+            style={{ background: 'var(--color-primary)' }}
           >
             迁移
           </button>
@@ -585,53 +509,29 @@ export default function LargeFolders() {
   const appDataFolders = folders.filter(f => f.folder_type === 'AppData');
 
   return (
-    <div className="h-full overflow-hidden flex flex-col" style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
-      <div className="h-full max-w-5xl mx-auto flex flex-col w-full" style={{ gap: 'var(--spacing-4)' }}>
-        {/* 顶部统计 */}
+    <div className="h-full overflow-hidden flex flex-col px-5 py-4">
+      <div className="h-full max-w-5xl mx-auto flex flex-col w-full gap-3">
+        {/* 顶部统计 + 刷新 */}
         <header className="flex items-center justify-between flex-shrink-0">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+          <div className="flex items-center gap-3">
             {/* 可释放空间 */}
-            <div 
-              style={{
-                padding: '12px 20px',
-                background: 'var(--color-primary-light)',
-                borderRadius: 'var(--radius-lg)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '12px',
-              }}
-            >
-              <div style={{ color: 'var(--color-primary)' }}>
-                <FolderOpen className="w-5 h-5" />
-              </div>
+            <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)]">
+              <FolderOpen className="w-4 h-4 text-[var(--color-primary)]" />
               <div>
-                <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>可释放空间</div>
-                <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-primary)' }}>
-                  {loading ? '计算中...' : formatSize(totalReclaimable)}
+                <div className="text-[10px] text-[var(--text-muted)]">可释放空间</div>
+                <div className="text-[15px] font-bold text-[var(--color-primary)] leading-tight">
+                  {loading ? '...' : formatSize(totalReclaimable)}
                 </div>
               </div>
             </div>
 
             {/* 已迁移数量 */}
             {migratedCount > 0 && (
-              <div 
-                style={{
-                  padding: '12px 20px',
-                  background: 'var(--color-success-light)',
-                  borderRadius: 'var(--radius-lg)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                }}
-              >
-                <div style={{ color: 'var(--color-success)' }}>
-                  <Link2 className="w-5 h-5" />
-                </div>
+              <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)]">
+                <Link2 className="w-4 h-4 text-emerald-600" />
                 <div>
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>已迁移</div>
-                  <div style={{ fontSize: '18px', fontWeight: 700, color: 'var(--color-success)' }}>
-                    {migratedCount} 个
-                  </div>
+                  <div className="text-[10px] text-[var(--text-muted)]">已迁移</div>
+                  <div className="text-[15px] font-bold text-emerald-600 leading-tight">{migratedCount} 个</div>
                 </div>
               </div>
             )}
@@ -640,64 +540,41 @@ export default function LargeFolders() {
           <button
             onClick={handleRefresh}
             disabled={refreshing}
-            className="btn btn-secondary"
+            className="h-8 px-3 text-[12px] font-medium rounded-md border border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors inline-flex items-center gap-1.5 disabled:opacity-50"
           >
-            <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
             刷新
           </button>
         </header>
 
         {/* 内容区域 */}
-        <div className="flex-1 min-h-0 overflow-y-auto" style={{ paddingRight: '4px' }}>
+        <div className="flex-1 min-h-0 overflow-y-auto">
           {loading ? (
-            // 加载骨架屏
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] divide-y divide-[var(--border-color)]">
               {[1, 2, 3, 4, 5].map((i) => (
-                <div 
-                  key={i}
-                  className="animate-pulse"
-                  style={{
-                    background: 'var(--bg-card)',
-                    borderRadius: 'var(--radius-lg)',
-                    border: '1px solid var(--border-color)',
-                    padding: '16px',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '16px',
-                  }}
-                >
-                  <div style={{ width: '44px', height: '44px', borderRadius: 'var(--radius-lg)', background: 'var(--color-gray-100)' }} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ width: '120px', height: '16px', borderRadius: '4px', background: 'var(--color-gray-100)', marginBottom: '8px' }} />
-                    <div style={{ width: '200px', height: '12px', borderRadius: '4px', background: 'var(--color-gray-100)' }} />
+                <div key={i} className="flex items-center gap-3 px-3 py-2.5 animate-pulse">
+                  <div className="w-9 h-9 rounded-lg bg-[var(--bg-hover)]" />
+                  <div className="flex-1">
+                    <div className="h-3.5 rounded w-28 mb-1.5 bg-[var(--bg-hover)]" />
+                    <div className="h-3 rounded w-48 bg-[var(--bg-hover)]" />
                   </div>
-                  <div style={{ width: '80px', height: '32px', borderRadius: 'var(--radius-md)', background: 'var(--color-gray-100)' }} />
+                  <div className="w-16 h-7 rounded-md bg-[var(--bg-hover)]" />
                 </div>
               ))}
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="flex flex-col gap-4">
               {/* 系统文件夹 */}
               {systemFolders.length > 0 && (
                 <section>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
-                    <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
-                      系统文件夹
-                    </h2>
-                    <span 
-                      style={{ 
-                        fontSize: '10px', 
-                        padding: '2px 8px', 
-                        borderRadius: '4px',
-                        background: 'var(--color-warning-light)',
-                        color: 'var(--color-warning)',
-                      }}
-                    >
-                      <AlertTriangle className="w-3 h-3 inline mr-1" />
+                  <div className="flex items-center gap-2 mb-2">
+                    <h2 className="text-[13px] font-semibold text-[var(--text-primary)]">系统文件夹</h2>
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-500/10 text-amber-600">
+                      <AlertTriangle className="w-3 h-3" />
                       迁移需谨慎
                     </span>
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] divide-y divide-[var(--border-color)]">
                     {systemFolders.map((folder) => (
                       <FolderCard
                         key={folder.id}
@@ -714,10 +591,8 @@ export default function LargeFolders() {
               {/* 应用数据文件夹 */}
               {appDataFolders.length > 0 && (
                 <section>
-                  <h2 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 12px 0' }}>
-                    应用数据
-                  </h2>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <h2 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">应用数据</h2>
+                  <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] divide-y divide-[var(--border-color)]">
                     {appDataFolders.map((folder) => (
                       <FolderCard
                         key={folder.id}
@@ -733,15 +608,11 @@ export default function LargeFolders() {
 
               {/* 空状态 */}
               {folders.length === 0 && (
-                <div 
-                  style={{
-                    textAlign: 'center',
-                    padding: '60px 20px',
-                    color: 'var(--text-muted)',
-                  }}
-                >
-                  <FolderOpen style={{ width: '48px', height: '48px', margin: '0 auto 16px', opacity: 0.5 }} />
-                  <p style={{ fontSize: '14px', margin: 0 }}>未检测到可迁移的大文件夹</p>
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <div className="w-12 h-12 rounded-xl bg-[var(--bg-hover)] flex items-center justify-center mb-3">
+                    <FolderOpen className="w-5 h-5 text-[var(--text-muted)]" />
+                  </div>
+                  <p className="text-[14px] font-medium text-[var(--text-primary)] mb-1">未检测到可迁移的文件夹</p>
                 </div>
               )}
             </div>
