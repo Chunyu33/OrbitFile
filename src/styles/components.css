@@ -50,3 +50,55 @@
   background: var(--color-success-light, rgba(22, 163, 74, 0.12));
   color: var(--color-success);
 }
+
+/* 按钮体系（兼容旧用法） */
+.btn {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--color-primary);
+  transition: opacity 140ms ease, background-color 140ms ease, color 140ms ease;
+}
+
+.btn:hover {
+  opacity: 0.9;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+}
+
+.btn-secondary {
+  color: var(--text-secondary);
+  background: var(--bg-hover);
+  font-weight: 500;
+}
+
+.btn-secondary:hover {
+  opacity: 1;
+  color: var(--color-primary);
+}
+
+.btn-ghost {
+  color: var(--text-secondary);
+  background: transparent;
+  font-weight: 500;
+}
+
+.btn-ghost:hover {
+  opacity: 1;
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.btn-icon {
+  width: 34px;
+  padding: 0;
+}

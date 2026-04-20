@@ -234,7 +234,7 @@ export default function DiskUsageBar({ disks, loading, refreshing = false, onRef
             border: '1px solid var(--border-color)',
             background: 'var(--bg-card)',
             boxShadow: 'var(--shadow-xl)',
-            zIndex: 30,
+            zIndex: 1200,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>

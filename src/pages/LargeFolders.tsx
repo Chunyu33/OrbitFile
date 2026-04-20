@@ -240,9 +240,9 @@ function FolderCard({
     : 'text-[var(--color-primary)]';
 
   return (
-    <div className={`flex items-center gap-3 px-3 py-2.5 hover:bg-[var(--bg-hover)] rounded-lg transition-colors duration-150 ${notFound ? 'opacity-50' : ''}`}>
+    <div className={`group flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--bg-card)] shadow-[0_1px_0_rgba(15,23,42,0.04),0_6px_18px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_10px_26px_rgba(15,23,42,0.1)] dark:shadow-[0_1px_0_rgba(0,0,0,0.28),0_8px_22px_rgba(0,0,0,0.28)] dark:hover:shadow-[0_12px_28px_rgba(0,0,0,0.36)] ${notFound ? 'opacity-55' : ''}`}>
       {/* 图标 */}
-      <div className={`w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0 ${iconBg} ${iconColor}`}>
+      <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${iconBg} ${iconColor}`}>
         {getFolderIcon(folder.icon_id)}
       </div>
 
@@ -280,7 +280,7 @@ function FolderCard({
 
       {/* 大小 */}
       <div className="flex-shrink-0 text-right w-20">
-        <span className="text-[13px] font-semibold text-[var(--text-primary)] tabular-nums">
+        <span className="inline-flex items-center h-7 px-2.5 rounded-full bg-[var(--bg-hover)]/75 text-[12px] font-semibold text-[var(--text-primary)] tabular-nums">
           {notFound ? '—' : folder.is_junction ? '—' : formatSize(folder.size)}
         </span>
         {!notFound && !folder.is_junction && folder.size > 0 && (
@@ -293,7 +293,7 @@ function FolderCard({
         {!notFound && (
           <button
             onClick={() => onOpenFolder(folder.path)}
-            className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)] transition-colors"
+            className="p-1.5 rounded-md text-[var(--text-tertiary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors"
             title="打开文件夹"
           >
             <FolderOpen className="w-4 h-4" />
@@ -301,13 +301,13 @@ function FolderCard({
         )}
 
         {notFound ? (
-          <button disabled className="h-7 px-3 text-[12px] font-medium rounded-md border border-[var(--border-color)] text-[var(--text-muted)] opacity-40 cursor-not-allowed">
+          <button disabled className="h-7 px-3 text-[12px] font-medium rounded-md bg-[var(--bg-hover)] text-[var(--text-muted)] opacity-45 cursor-not-allowed">
             不可用
           </button>
         ) : folder.is_junction ? (
           <button
             onClick={() => onRestore(folder)}
-            className="h-7 px-3 text-[12px] font-medium rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] transition-colors inline-flex items-center gap-1.5"
+            className="h-7 px-3 text-[12px] font-medium rounded-md bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--color-primary)] transition-colors inline-flex items-center gap-1.5"
           >
             <Undo2 className="w-3.5 h-3.5" />
             恢复
@@ -548,12 +548,12 @@ export default function LargeFolders() {
         </header>
 
         {/* 内容区域 */}
-        <div className="flex-1 min-h-0 overflow-y-auto">
+        <div className="flex-1 min-h-0 overflow-y-auto px-1">
           {loading ? (
-            <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] divide-y divide-[var(--border-color)]">
+            <div className="space-y-2 py-1">
               {[1, 2, 3, 4, 5].map((i) => (
-                <div key={i} className="flex items-center gap-3 px-3 py-2.5 animate-pulse">
-                  <div className="w-9 h-9 rounded-lg bg-[var(--bg-hover)]" />
+                <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-[var(--bg-card)] animate-pulse shadow-[0_1px_0_rgba(15,23,42,0.04),0_6px_18px_rgba(15,23,42,0.06)] dark:shadow-[0_1px_0_rgba(0,0,0,0.28),0_8px_22px_rgba(0,0,0,0.28)]">
+                  <div className="w-9 h-9 rounded-xl bg-[var(--bg-hover)]" />
                   <div className="flex-1">
                     <div className="h-3.5 rounded w-28 mb-1.5 bg-[var(--bg-hover)]" />
                     <div className="h-3 rounded w-48 bg-[var(--bg-hover)]" />
@@ -563,7 +563,7 @@ export default function LargeFolders() {
               ))}
             </div>
           ) : (
-            <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-4 py-1">
               {/* 系统文件夹 */}
               {systemFolders.length > 0 && (
                 <section>
@@ -574,7 +574,7 @@ export default function LargeFolders() {
                       迁移需谨慎
                     </span>
                   </div>
-                  <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] divide-y divide-[var(--border-color)]">
+                  <div className="space-y-2">
                     {systemFolders.map((folder) => (
                       <FolderCard
                         key={folder.id}
@@ -592,7 +592,7 @@ export default function LargeFolders() {
               {appDataFolders.length > 0 && (
                 <section>
                   <h2 className="text-[13px] font-semibold text-[var(--text-primary)] mb-2">应用数据</h2>
-                  <div className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] divide-y divide-[var(--border-color)]">
+                  <div className="space-y-2">
                     {appDataFolders.map((folder) => (
                       <FolderCard
                         key={folder.id}

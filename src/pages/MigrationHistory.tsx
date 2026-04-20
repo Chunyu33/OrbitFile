@@ -68,11 +68,15 @@ function HistoryRow({
 
   return (
     <div className={`
-      group relative rounded-xl border bg-[var(--bg-card)] px-4 py-3
+      group relative rounded-xl bg-[var(--bg-card)] px-4 py-3
       transition-all duration-200 hover:-translate-y-[1px]
+      shadow-[0_1px_0_rgba(15,23,42,0.04),0_6px_18px_rgba(15,23,42,0.06)]
+      hover:shadow-[0_10px_26px_rgba(15,23,42,0.1)]
+      dark:shadow-[0_1px_0_rgba(0,0,0,0.28),0_8px_22px_rgba(0,0,0,0.28)]
+      dark:hover:shadow-[0_12px_28px_rgba(0,0,0,0.36)]
       ${linkStatus === 'broken'
-        ? 'border-red-200 bg-red-50/50 dark:bg-red-900/10'
-        : 'border-[var(--border-color)] hover:border-[var(--border-color-hover)]'
+        ? 'bg-red-50/55 dark:bg-red-900/12'
+        : ''
       }
       ${!isLast ? '' : ''}
     `}>
@@ -118,7 +122,7 @@ function HistoryRow({
 
       {/* 大小 */}
       <div className="flex-shrink-0">
-        <div className="h-7 px-2.5 rounded-full bg-[var(--bg-hover)] border border-[var(--border-color)] inline-flex items-center">
+        <div className="h-7 px-2.5 rounded-full bg-[var(--bg-hover)]/75 inline-flex items-center">
           <span className="text-[11px] font-semibold text-[var(--text-primary)] tabular-nums">
             {formatSize(record.size)}
           </span>
@@ -129,7 +133,7 @@ function HistoryRow({
       <button
         onClick={() => onRestore(record.id, record.record_type || 'App')}
         disabled={isRestoring}
-        className="flex-shrink-0 h-8 w-8 rounded-md border border-[var(--border-color)] text-[var(--text-secondary)] hover:border-[var(--color-primary)] hover:text-[var(--color-primary)] hover:bg-[var(--bg-hover)] transition-colors inline-flex items-center justify-center disabled:opacity-50"
+        className="flex-shrink-0 h-8 w-8 rounded-md text-[var(--text-secondary)] hover:text-[var(--color-primary)] hover:bg-[var(--bg-hover)] transition-colors inline-flex items-center justify-center disabled:opacity-50"
         title="恢复到原位置"
       >
         {isRestoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
@@ -249,12 +253,12 @@ export default function MigrationHistory() {
           <div className="flex items-center gap-3">
             {records.length > 0 && (
               <>
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-card)] text-[12px] shadow-sm">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-card)] text-[12px] shadow-[0_1px_0_rgba(15,23,42,0.05)] dark:shadow-[0_1px_0_rgba(0,0,0,0.32)]">
                   <History className="w-3.5 h-3.5 text-[var(--color-primary)]" />
                   <span className="font-semibold text-[var(--text-primary)]">{records.length}</span>
                   <span className="text-[var(--text-muted)]">项记录</span>
                 </div>
-                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-[var(--border-color)] bg-[var(--bg-card)] text-[12px] shadow-sm">
+                <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-[var(--bg-card)] text-[12px] shadow-[0_1px_0_rgba(15,23,42,0.05)] dark:shadow-[0_1px_0_rgba(0,0,0,0.32)]">
                   <HardDrive className="w-3.5 h-3.5 text-emerald-600" />
                   <span className="font-semibold text-[var(--text-primary)]">{formatSize(totalSize)}</span>
                   <span className="text-[var(--text-muted)]">已释放</span>
@@ -287,8 +291,8 @@ export default function MigrationHistory() {
         ) : records.length === 0 ? (
           <EmptyState />
         ) : (
-          <div className="flex-1 min-h-0 overflow-y-auto">
-            <div className="space-y-2 pb-2">
+          <div className="flex-1 min-h-0 overflow-y-auto px-1">
+            <div className="space-y-2 py-1">
               {records.map((record, index) => (
                 <HistoryRow
                   key={record.id}

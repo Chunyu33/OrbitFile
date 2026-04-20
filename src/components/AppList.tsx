@@ -309,31 +309,35 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
           />
         </div>
 
-        {/* 迁移状态筛选 */}
-        <FilterSelect
-          value={migrationFilter}
-          onChange={setMigrationFilter}
-          options={migrationOptions}
-        />
+        <div className="flex items-center gap-2 shrink-1">
+          {/* 迁移状态筛选 */}
+          <FilterSelect
+            value={migrationFilter}
+            onChange={setMigrationFilter}
+            options={migrationOptions}
+            className="w-[130px]"
+          />
 
-        {/* 盘符筛选 */}
-        <FilterSelect
-          value={driveFilter}
-          onChange={setDriveFilter}
-          options={driveOptions}
-        />
+          {/* 盘符筛选 */}
+          <FilterSelect
+            value={driveFilter}
+            onChange={setDriveFilter}
+            options={driveOptions}
+            className="w-[130px]"
+          />
 
-        {/* 应用计数 */}
-        <div className="flex items-center gap-1 px-2 h-8 text-[12px] text-[var(--text-secondary)] bg-[var(--bg-hover)] rounded-md">
-          <span className="font-semibold text-[var(--text-primary)]">{filteredApps.length}</span>
-          <span>个</span>
+          {/* 应用计数 */}
+          <div className="flex items-center gap-1 px-2 h-8 text-[12px] text-[var(--text-secondary)] bg-[var(--bg-hover)] rounded-md">
+            <span className="font-semibold text-[var(--text-primary)]">{filteredApps.length}</span>
+            <span>个</span>
+          </div>
         </div>
       </div>
 
       {/* 应用列表 */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div className="flex-1 min-h-0 overflow-y-auto px-1">
         {filteredApps.length > 0 ? (
-          <div className="space-y-2 pb-2">
+          <div className="space-y-2 py-1">
             {filteredApps.map((app, index) => (
               <AppRow 
                 key={`${app.display_name}-${index}`} 
