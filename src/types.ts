@@ -104,7 +104,7 @@ export type TabType = 'migration' | 'folders' | 'history' | 'settings';
 /**
  * 大文件夹类型枚举
  */
-export type LargeFolderType = 'System' | 'AppData';
+export type LargeFolderType = 'System' | 'AppData' | 'Custom';
 
 /**
  * 大文件夹信息接口
@@ -134,18 +134,32 @@ export interface LargeFolder {
 }
 
 /**
- * 特殊应用目录状态
- * 对应 Rust 后端的 SpecialFolder 结构体
+ * 大文件夹大小更新事件
+ * 后台异步计算大小后通过 "large-folder-size" 事件推送
  */
-export interface SpecialFolder {
-  // 应用标识（wechat / qq / tim / wxwork / dingtalk / feishu）
-  name: string;
-  // 当前检测到的路径（未检测到时为默认候选路径）
-  current_path: string;
-  // 是否成功检测到真实目录
-  is_detected: boolean;
-  // 目录大小（MB）
-  size_mb: number;
+export interface LargeFolderSizeEvent {
+  folder_id: string;
+  size: number;
+}
+
+/**
+ * 大文件夹迁移完成事件
+ * 迁移在后台线程执行，完成后通过 "large-folder-migration-complete" 事件推送
+ */
+export interface LargeFolderMigrationCompleteEvent {
+  success: boolean;
+  message: string;
+  new_path: string | null;
+}
+
+/**
+ * 大文件夹恢复完成事件
+ * 恢复在后台线程执行，完成后通过 "large-folder-restore-complete" 事件推送
+ */
+export interface LargeFolderRestoreCompleteEvent {
+  success: boolean;
+  message: string;
+  new_path: string | null;
 }
 
 /**

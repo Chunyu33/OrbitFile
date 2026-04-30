@@ -1,7 +1,7 @@
 // Toast 通知组件
 // Windows 11 Fluent Design 风格
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, XCircle, Info, X } from 'lucide-react';
 
 export type ToastType = 'success' | 'error' | 'info';
@@ -106,13 +106,14 @@ export function useToast() {
     visible: false,
   });
 
-  const showToast = (message: string, type: ToastType = 'info') => {
+  // showToast 用 useCallback 稳定引用，防止消费方因依赖变化导致无限重渲染
+  const showToast = useCallback((message: string, type: ToastType = 'info') => {
     setToast({ message, type, visible: true });
-  };
+  }, []);
 
-  const hideToast = () => {
+  const hideToast = useCallback(() => {
     setToast(prev => ({ ...prev, visible: false }));
-  };
+  }, []);
 
   return { toast, showToast, hideToast };
 }

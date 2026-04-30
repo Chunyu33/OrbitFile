@@ -53,35 +53,20 @@ pub fn detect_chat_app_data(app_name: &str) -> Option<PathBuf> {
     }
 }
 
-/// 获取特殊目录状态列表
+/// 获取特殊目录状态列表（聊天应用 + 开发工具 + 浏览器缓存）
 pub fn get_special_folders_status() -> Result<Vec<SpecialFolder>, String> {
     #[cfg(windows)]
     {
         let mut result = Vec::new();
 
+        // 聊天应用
         for app_name in ["wechat", "qq", "tim", "wxwork", "dingtalk", "feishu"] {
-            let detected = detect_chat_app_data(app_name);
-            let fallback = default_special_path(app_name);
+            result.push(folder_status(app_name));
+        }
 
-            let (current_path, is_detected, size_mb) = match detected {
-                Some(path) => {
-                    let size_mb = calc_size_mb(&path);
-                    (path.to_string_lossy().to_string(), true, size_mb)
-                }
-                None => {
-                    let current_path = fallback
-                        .map(|p| p.to_string_lossy().to_string())
-                        .unwrap_or_default();
-                    (current_path, false, 0.0)
-                }
-            };
-
-            result.push(SpecialFolder {
-                name: app_name.to_string(),
-                current_path,
-                is_detected,
-                size_mb,
-            });
+        // 开发工具与浏览器缓存
+        for app_name in ["chrome_cache", "edge_cache", "vscode_extensions", "npm_global"] {
+            result.push(folder_status(app_name));
         }
 
         Ok(result)
@@ -90,6 +75,33 @@ pub fn get_special_folders_status() -> Result<Vec<SpecialFolder>, String> {
     #[cfg(not(windows))]
     {
         Ok(Vec::new())
+    }
+}
+
+/// 获取单个特殊目录的状态（动态检测路径 + 大小）
+#[cfg(windows)]
+fn folder_status(app_name: &str) -> SpecialFolder {
+    let detected = detect_chat_app_data(app_name);
+    let fallback = default_special_path(app_name);
+
+    let (current_path, is_detected, size_mb) = match detected {
+        Some(path) => {
+            let size_mb = calc_size_mb(&path);
+            (path.to_string_lossy().to_string(), true, size_mb)
+        }
+        None => {
+            let current_path = fallback
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+            (current_path, false, 0.0)
+        }
+    };
+
+    SpecialFolder {
+        name: app_name.to_string(),
+        current_path,
+        is_detected,
+        size_mb,
     }
 }
 
@@ -205,15 +217,22 @@ fn detect_qq_tim_path() -> Option<PathBuf> {
 
 #[cfg(windows)]
 fn detect_feishu_path() -> Option<PathBuf> {
-    let roaming = dirs::data_dir().map(|d| d.join("LarkShell"));
-    if let Some(path) = roaming {
-        if path.exists() {
-            return Some(path);
+    // 候选路径按优先级排列：Roaming LarkShell → Local LarkShell → Roaming Feishu → Local Feishu
+    let candidates: Vec<Option<PathBuf>> = vec![
+        dirs::data_dir().map(|d| d.join("LarkShell")),
+        dirs::data_local_dir().map(|d| d.join("LarkShell")),
+        dirs::data_dir().map(|d| d.join("Feishu")),
+        dirs::data_local_dir().map(|d| d.join("Feishu")),
+        dirs::data_dir().map(|d| d.join("Lark")),
+        dirs::data_local_dir().map(|d| d.join("Lark")),
+    ];
+
+    for candidate in candidates.into_iter().flatten() {
+        if candidate.exists() && candidate.is_dir() {
+            return Some(candidate);
         }
     }
-
-    let local = dirs::data_local_dir().map(|d| d.join("LarkShell"));
-    local.and_then(detect_existing)
+    None
 }
 
 #[cfg(windows)]
@@ -224,6 +243,10 @@ fn default_special_path(app_name: &str) -> Option<PathBuf> {
         "wxwork" => dirs::document_dir().map(|d| d.join("WXWork")),
         "dingtalk" => dirs::data_dir().map(|d| d.join("DingTalk")),
         "feishu" | "lark" => dirs::data_local_dir().map(|d| d.join("LarkShell")),
+        "chrome_cache" => dirs::data_local_dir().map(|d| d.join(r"Google\Chrome\User Data\Default\Cache")),
+        "edge_cache" => dirs::data_local_dir().map(|d| d.join(r"Microsoft\Edge\User Data\Default\Cache")),
+        "vscode_extensions" => dirs::home_dir().map(|d| d.join(".vscode").join("extensions")),
+        "npm_global" => dirs::data_dir().map(|d| d.join("npm").join("node_modules")),
         _ => dirs::home_dir(),
     }
 }
@@ -237,6 +260,9 @@ fn expected_process_names(app_name: &str) -> &'static [&'static str] {
         "wxwork" => &["wxwork.exe"],
         "dingtalk" => &["dingtalk.exe"],
         "feishu" | "lark" => &["feishu.exe", "lark.exe"],
+        "chrome_cache" => &["chrome.exe"],
+        "edge_cache" => &["msedge.exe"],
+        "vscode_extensions" => &["code.exe"],
         _ => &[],
     }
 }

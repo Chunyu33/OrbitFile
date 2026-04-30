@@ -5,6 +5,7 @@ mod app_manager;
 
 use serde::{Deserialize, Serialize};
 use sysinfo::Disks;
+use tauri::Emitter;
 use std::path::{Path, PathBuf};
 use std::fs;
 use std::io::{Read, Write, Cursor};
@@ -37,7 +38,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::core::PCWSTR;
 
 // fs_extra 用于递归复制文件夹和移动文件夹
-use fs_extra::dir::{copy, move_dir, CopyOptions, get_size};
+use fs_extra::dir::{move_dir, CopyOptions, get_size};
 
 // 图标缓存：使用 Mutex 保护的 HashMap 存储已提取的图标
 // 键为图标路径，值为 Base64 编码的图标数据
@@ -157,12 +158,6 @@ pub(crate) fn extract_icon_to_base64(icon_path: &str) -> String {
 
         base64_result
     }
-}
-
-/// 获取特殊应用目录检测状态（动态路径）
-#[tauri::command]
-fn get_special_folders_status() -> Result<Vec<app_manager::detector::SpecialFolder>, String> {
-    app_manager::detector::get_special_folders_status()
 }
 
 /// 迁移特殊应用目录（含进程预检）
@@ -380,6 +375,8 @@ pub enum LargeFolderType {
     System,
     /// 应用数据文件夹（微信、钉钉等）- 迁移风险较低
     AppData,
+    /// 自定义文件夹（用户手动添加）
+    Custom,
 }
 
 /// 大文件夹信息结构体
@@ -406,6 +403,73 @@ pub struct LargeFolder {
     pub icon_id: String,
     /// 是否存在
     pub exists: bool,
+}
+
+/// 大文件夹大小更新事件
+/// 后台异步计算大小后推送给前端
+#[derive(Debug, Clone, Serialize)]
+struct LargeFolderSizeEvent {
+    folder_id: String,
+    size: u64,
+}
+
+/// 大文件夹迁移完成事件
+/// 迁移在后台线程执行，完成后通过此事件通知前端
+#[derive(Debug, Clone, Serialize)]
+struct LargeFolderMigrationCompleteEvent {
+    success: bool,
+    message: String,
+    new_path: Option<String>,
+}
+
+/// 大文件夹恢复完成事件
+/// 恢复在后台线程执行，完成后通过此事件通知前端
+#[derive(Debug, Clone, Serialize)]
+struct LargeFolderRestoreCompleteEvent {
+    success: bool,
+    message: String,
+    new_path: Option<String>,
+}
+
+/// 自定义文件夹持久化条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CustomFolderEntry {
+    id: String,
+    path: String,
+    display_name: String,
+}
+
+/// 自定义文件夹持久化文件路径 (%APPDATA%/orbit-file/custom_folders.json)
+fn custom_folders_path() -> Option<PathBuf> {
+    let appdata = std::env::var("APPDATA").ok()?;
+    let dir = PathBuf::from(&appdata).join("orbit-file");
+    Some(dir.join("custom_folders.json"))
+}
+
+/// 读取自定义文件夹列表
+fn load_custom_folders() -> Vec<CustomFolderEntry> {
+    let path = match custom_folders_path() {
+        Some(p) => p,
+        None => return Vec::new(),
+    };
+    if !path.exists() {
+        return Vec::new();
+    }
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<CustomFolderEntry>>(&s).ok())
+        .unwrap_or_default()
+}
+
+/// 保存自定义文件夹列表
+fn save_custom_folders(folders: &[CustomFolderEntry]) -> Result<(), String> {
+    let path = custom_folders_path().ok_or("无法获取 APPDATA 路径")?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {}", e))?;
+    }
+    let json = serde_json::to_string_pretty(folders).map_err(|e| format!("序列化失败: {}", e))?;
+    std::fs::write(&path, &json).map_err(|e| format!("写入失败: {}", e))?;
+    Ok(())
 }
 
 /// 检测路径是否为 Junction（目录联接）
@@ -502,7 +566,7 @@ fn get_folder_size(path: &Path) -> u64 {
 /// 说明: 飞书在不同版本可能使用不同路径
 /// 进程名: Lark.exe, Feishu.exe
 #[tauri::command]
-fn get_large_folders() -> Result<Vec<LargeFolder>, String> {
+fn get_large_folders(app_handle: tauri::AppHandle) -> Result<Vec<LargeFolder>, String> {
     let mut folders: Vec<LargeFolder> = Vec::new();
     
     // ========== 系统文件夹 ==========
@@ -516,7 +580,7 @@ fn get_large_folders() -> Result<Vec<LargeFolder>, String> {
             id: "desktop".to_string(),
             display_name: "桌面".to_string(),
             path: path_str.clone(),
-            size: if is_junc { 0 } else { get_folder_size(&desktop) },
+            size: 0, // 大小由 compute_folder_sizes_async 后台异步计算
             folder_type: LargeFolderType::System,
             is_junction: is_junc,
             junction_target: get_junction_target(&desktop),
@@ -534,7 +598,7 @@ fn get_large_folders() -> Result<Vec<LargeFolder>, String> {
             id: "documents".to_string(),
             display_name: "文档".to_string(),
             path: path_str.clone(),
-            size: if is_junc { 0 } else { get_folder_size(&documents) },
+            size: 0,
             folder_type: LargeFolderType::System,
             is_junction: is_junc,
             junction_target: get_junction_target(&documents),
@@ -552,7 +616,7 @@ fn get_large_folders() -> Result<Vec<LargeFolder>, String> {
             id: "downloads".to_string(),
             display_name: "下载".to_string(),
             path: path_str.clone(),
-            size: if is_junc { 0 } else { get_folder_size(&downloads) },
+            size: 0,
             folder_type: LargeFolderType::System,
             is_junction: is_junc,
             junction_target: get_junction_target(&downloads),
@@ -570,7 +634,7 @@ fn get_large_folders() -> Result<Vec<LargeFolder>, String> {
             id: "pictures".to_string(),
             display_name: "图片".to_string(),
             path: path_str.clone(),
-            size: if is_junc { 0 } else { get_folder_size(&pictures) },
+            size: 0,
             folder_type: LargeFolderType::System,
             is_junction: is_junc,
             junction_target: get_junction_target(&pictures),
@@ -588,7 +652,7 @@ fn get_large_folders() -> Result<Vec<LargeFolder>, String> {
             id: "videos".to_string(),
             display_name: "视频".to_string(),
             path: path_str.clone(),
-            size: if is_junc { 0 } else { get_folder_size(&videos) },
+            size: 0,
             folder_type: LargeFolderType::System,
             is_junction: is_junc,
             junction_target: get_junction_target(&videos),
@@ -598,38 +662,40 @@ fn get_large_folders() -> Result<Vec<LargeFolder>, String> {
         });
     }
     
-    // ========== 办公软件数据文件夹 ==========
-    // 通过环境变量获取用户目录路径
-    // 
-    // 注意：这些路径是各软件的默认数据存储位置
-    // 如果用户在软件设置中更改了存储位置，则需要手动添加
-    
-    // 获取用户目录 (%USERPROFILE%)
-    let user_profile = std::env::var("USERPROFILE").unwrap_or_default();
-    // 获取 AppData\Roaming (%APPDATA%)
-    let appdata = std::env::var("APPDATA").unwrap_or_default();
-    // 获取 AppData\Local (%LOCALAPPDATA%)
-    let localappdata = std::env::var("LOCALAPPDATA").unwrap_or_default();
-    
-    // 辅助函数：添加应用数据文件夹
-    // 无论目录是否存在都添加，便于用户了解支持的应用
-    fn add_app_folder(
-        folders: &mut Vec<LargeFolder>,
-        id: &str,
-        display_name: &str,
-        path: PathBuf,
-        process_names: Vec<String>,
-        icon_id: &str,
-    ) {
-        let exists = path.exists();
-        let path_str = path.to_string_lossy().to_string();
+    // ========== 应用数据文件夹 ==========
+    // 通过 detector 模块动态检测路径（优先注册表/配置文件），不存在时回退到默认路径
+    // 新增文件夹模板只需在 detector.rs 中添加即可
+    let app_data_templates: Vec<(&str, &str, &str, Vec<&str>)> = vec![
+        ("wechat", "微信", "wechat", vec!["WeChat.exe"]),
+        ("wxwork", "企业微信", "wxwork", vec!["WXWork.exe"]),
+        ("qq", "QQ", "qq", vec!["QQ.exe"]),
+        ("dingtalk", "钉钉", "dingtalk", vec!["DingTalk.exe"]),
+        ("feishu", "飞书", "feishu", vec!["Lark.exe", "Feishu.exe"]),
+        ("chrome_cache", "Chrome 缓存", "chrome_cache", vec!["chrome.exe"]),
+        ("edge_cache", "Edge 缓存", "edge_cache", vec!["msedge.exe"]),
+        ("vscode_extensions", "VS Code 扩展", "vscode_extensions", vec!["code.exe"]),
+        ("npm_global", "npm 全局包", "npm_global", vec![]),
+    ];
+
+    // 通过 detector 获取各应用的动态检测路径
+    let special_statuses = app_manager::detector::get_special_folders_status()?;
+    for status in special_statuses {
+        let template = app_data_templates.iter().find(|t| t.0 == status.name);
+        let (display_name, icon_id, process_names) = match template {
+            Some(t) => (t.1, t.2, t.3.iter().map(|s| s.to_string()).collect()),
+            None => continue,
+        };
+
+        let path = PathBuf::from(&status.current_path);
+        let exists = status.is_detected;
         let is_junc = if exists { is_junction(&path) } else { false };
-        
+
+        // 大小在后台异步计算，初始化时为 0 避免阻塞
         folders.push(LargeFolder {
-            id: id.to_string(),
+            id: status.name,
             display_name: display_name.to_string(),
-            path: path_str,
-            size: if exists && !is_junc { get_folder_size(&path) } else { 0 },
+            path: status.current_path,
+            size: 0,
             folder_type: LargeFolderType::AppData,
             is_junction: is_junc,
             junction_target: if is_junc { get_junction_target(&path) } else { None },
@@ -638,308 +704,266 @@ fn get_large_folders() -> Result<Vec<LargeFolder>, String> {
             exists,
         });
     }
-    
-    // 微信 - %USERPROFILE%\Documents\WeChat Files
-    // 微信默认将聊天记录、图片、文件等存储在此目录
-    // 用户可以在微信设置中更改此路径
-    add_app_folder(
-        &mut folders,
-        "wechat",
-        "微信",
-        PathBuf::from(&user_profile).join("Documents").join("WeChat Files"),
-        vec!["WeChat.exe".to_string()],
-        "wechat",
-    );
-    
-    // 企业微信 - %USERPROFILE%\Documents\WXWork
-    add_app_folder(
-        &mut folders,
-        "wxwork",
-        "企业微信",
-        PathBuf::from(&user_profile).join("Documents").join("WXWork"),
-        vec!["WXWork.exe".to_string()],
-        "wxwork",
-    );
-    
-    // QQ - %USERPROFILE%\Documents\Tencent Files
-    add_app_folder(
-        &mut folders,
-        "qq",
-        "QQ",
-        PathBuf::from(&user_profile).join("Documents").join("Tencent Files"),
-        vec!["QQ.exe".to_string()],
-        "qq",
-    );
-    
-    // 钉钉 - %APPDATA%\DingTalk
-    add_app_folder(
-        &mut folders,
-        "dingtalk",
-        "钉钉",
-        PathBuf::from(&appdata).join("DingTalk"),
-        vec!["DingTalk.exe".to_string()],
-        "dingtalk",
-    );
-    
-    // 飞书 - 检查多个可能的路径
-    // 飞书在不同版本可能使用不同路径
-    let feishu_appdata = PathBuf::from(&appdata).join("LarkShell");
-    let feishu_localappdata = PathBuf::from(&localappdata).join("LarkShell");
-    let feishu_path = if feishu_appdata.exists() {
-        feishu_appdata
-    } else {
-        feishu_localappdata
-    };
-    
-    add_app_folder(
-        &mut folders,
-        "feishu",
-        "飞书",
-        feishu_path,
-        vec!["Lark.exe".to_string(), "Feishu.exe".to_string()],
-        "feishu",
-    );
-    
+
+    // ========== 自定义文件夹 ==========
+    let custom = load_custom_folders();
+    for cf in &custom {
+        let path = PathBuf::from(&cf.path);
+        let exists = path.exists();
+        let is_junc = if exists { is_junction(&path) } else { false };
+        folders.push(LargeFolder {
+            id: cf.id.clone(),
+            display_name: cf.display_name.clone(),
+            path: cf.path.clone(),
+            size: 0,
+            folder_type: LargeFolderType::Custom,
+            is_junction: is_junc,
+            junction_target: if is_junc { get_junction_target(&path) } else { None },
+            app_process_names: vec![],
+            icon_id: "folder".to_string(),
+            exists,
+        });
+    }
+
     // 按大小降序排序（已迁移的排在后面）
     folders.sort_by(|a, b| {
-        // 已迁移的排在后面
         if a.is_junction && !b.is_junction {
             return std::cmp::Ordering::Greater;
         }
         if !a.is_junction && b.is_junction {
             return std::cmp::Ordering::Less;
         }
-        // 按大小降序
-        b.size.cmp(&a.size)
+        let type_order = |t: &LargeFolderType| match t {
+            LargeFolderType::System => 0,
+            LargeFolderType::AppData => 1,
+            LargeFolderType::Custom => 2,
+        };
+        type_order(&a.folder_type).cmp(&type_order(&b.folder_type))
     });
-    
+
+    // 后台异步计算各文件夹大小，通过 "large-folder-size" 事件推送给前端
+    compute_folder_sizes_async(app_handle.clone(), folders.clone());
+
     Ok(folders)
 }
 
+/// 后台异步计算各文件夹大小并通过事件推送
+/// 调用方式：get_large_folders 返回后 spawn 此函数
+fn compute_folder_sizes_async(app_handle: tauri::AppHandle, folders: Vec<LargeFolder>) {
+    std::thread::spawn(move || {
+        for folder in &folders {
+            if !folder.exists || folder.is_junction {
+                continue;
+            }
+            let path = PathBuf::from(&folder.path);
+            let size = get_folder_size(&path);
+            if size > 0 {
+                let _ = app_handle.emit("large-folder-size", LargeFolderSizeEvent {
+                    folder_id: folder.id.clone(),
+                    size,
+                });
+            }
+        }
+    });
+}
+
 /// 迁移大文件夹
-/// 复用现有的迁移逻辑，但增加了对系统文件夹的特殊处理
+/// 耗时操作在后台线程执行，通过 "large-folder-migration-complete" 事件通知前端结果
+/// 迁移过程中通过 "migration-progress" 事件推送进度
 #[tauri::command]
-fn migrate_large_folder(source_path: String, target_dir: String) -> Result<MigrationResult, String> {
-    // 复用现有的 migrate_app 逻辑
-    // source_path 是要迁移的文件夹路径
-    // target_dir 是目标目录（文件夹会被移动到这个目录下）
-    
-    #[cfg(windows)]
-    {
-        let source = Path::new(&source_path);
-        
-        // 检查源路径是否存在
-        if !source.exists() {
-            return Ok(MigrationResult {
-                success: false,
-                message: format!("源路径不存在: {}", source_path),
-                new_path: None,
-            });
-        }
-        
-        // 检查是否已经是 Junction
-        if is_junction(source) {
-            return Ok(MigrationResult {
-                success: false,
-                message: "该文件夹已经被迁移过了".to_string(),
-                new_path: None,
-            });
-        }
-        
-        // 获取文件夹名称
-        let folder_name = source.file_name()
-            .ok_or("无法获取文件夹名称")?
-            .to_string_lossy()
-            .to_string();
-        
-        // 构建目标路径
-        let target_path = Path::new(&target_dir).join(&folder_name);
-        let target_path_str = target_path.to_string_lossy().to_string();
-        
-        // 检查目标路径是否已存在
-        if target_path.exists() {
-            return Ok(MigrationResult {
-                success: false,
-                message: format!("目标路径已存在: {}", target_path_str),
-                new_path: None,
-            });
-        }
-        
-        // ========== 步骤 1: 复制文件夹 ==========
-        let mut options = CopyOptions::new();
-        options.overwrite = false;
-        options.copy_inside = true;
-        
-        // 复制文件夹到目标位置
-        copy(&source_path, &target_dir, &options).map_err(|e| {
-            format!("复制文件夹失败: {}", e)
-        })?;
-        
-        // ========== 步骤 2: 验证复制完整性 ==========
-        let source_size = get_size(&source_path).unwrap_or(0);
-        let target_size = get_size(&target_path).unwrap_or(0);
-        
-        // 允许 1% 的误差（某些系统文件可能无法复制）
-        if target_size < source_size * 99 / 100 {
-            // 复制不完整，清理目标文件夹
-            let _ = fs::remove_dir_all(&target_path);
-            return Ok(MigrationResult {
-                success: false,
-                message: format!(
-                    "文件复制不完整。源大小: {} 字节，目标大小: {} 字节",
-                    source_size, target_size
-                ),
-                new_path: None,
-            });
-        }
-        
-        // ========== 步骤 3: 备份并删除原文件夹 ==========
-        let backup_path = source.with_file_name(format!("{}_orbitfile_backup", folder_name));
-        
-        // 重命名原文件夹为备份
-        fs::rename(&source, &backup_path).map_err(|e| {
-            // 重命名失败，清理目标文件夹
-            let _ = fs::remove_dir_all(&target_path);
-            format!("无法备份原文件夹: {}。请确保没有程序正在使用该文件夹。", e)
-        })?;
-        
-        // ========== 步骤 4: 创建 Junction ==========
-        match symlink_dir(&target_path, &source) {
-            Ok(_) => {
-                // Junction 创建成功，删除备份
-                if let Err(e) = fs::remove_dir_all(&backup_path) {
-                    eprintln!("警告: 无法删除备份文件夹: {}", e);
-                }
-                
-                // ========== 步骤 5: 保存迁移记录 ==========
-                if let Err(e) = add_migration_record(
-                    &folder_name,
-                    &source_path,
-                    &target_path_str,
-                    source_size,
-                    MigrationRecordType::LargeFolder,
-                ) {
-                    eprintln!("警告: 保存迁移记录失败: {}", e);
-                }
-                
-                Ok(MigrationResult {
-                    success: true,
-                    message: format!("迁移成功！文件夹已从 {} 迁移到 {}", source_path, target_path_str),
-                    new_path: Some(target_path_str),
-                })
-            }
-            Err(e) => {
-                // Junction 创建失败，尝试恢复
-                if let Err(restore_err) = fs::rename(&backup_path, &source) {
-                    return Ok(MigrationResult {
-                        success: false,
-                        message: format!(
-                            "严重错误: 创建链接失败 ({})，且无法恢复原文件夹 ({})。\n备份位置: {}",
-                            e, restore_err, backup_path.to_string_lossy()
-                        ),
-                        new_path: None,
-                    });
-                }
-                
-                // 清理目标文件夹
-                let _ = fs::remove_dir_all(&target_path);
-                
-                Ok(MigrationResult {
-                    success: false,
-                    message: format!("创建符号链接失败: {}。原文件夹已恢复。", e),
-                    new_path: None,
-                })
-            }
-        }
+fn migrate_large_folder(
+    source_path: String,
+    target_dir: String,
+    state: tauri::State<'_, MigrationState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    // 基础校验（同步执行，快速失败）
+    let source = PathBuf::from(&source_path);
+    if !source.exists() {
+        return Err(format!("源路径不存在: {}", source_path));
     }
-    
-    #[cfg(not(windows))]
-    {
-        Ok(MigrationResult {
-            success: false,
-            message: "此功能仅支持 Windows 系统".to_string(),
-            new_path: None,
-        })
+    if !source.is_dir() {
+        return Err("源路径必须是一个目录".to_string());
     }
+
+    let folder_name = source
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    // 重置取消标志
+    state.cancel_flag.store(false, Ordering::SeqCst);
+    let cancel_flag = state.cancel_flag.clone();
+    let handle = app_handle.clone();
+
+    // 耗时 IO 操作放入独立线程，避免阻塞 Tauri 线程池
+    std::thread::spawn(move || {
+        let result = app_manager::migration::migrate_app(
+            folder_name,
+            source_path,
+            target_dir,
+            &cancel_flag,
+            &handle,
+        );
+
+        let event = match result {
+            Ok(r) => LargeFolderMigrationCompleteEvent {
+                success: r.success,
+                message: r.message,
+                new_path: r.new_path,
+            },
+            Err(e) => LargeFolderMigrationCompleteEvent {
+                success: false,
+                message: e,
+                new_path: None,
+            },
+        };
+        let _ = handle.emit("large-folder-migration-complete", event);
+    });
+
+    Ok(())
+}
+
+/// 添加自定义文件夹
+/// 将用户选择的文件夹路径持久化到 custom_folders.json
+#[tauri::command]
+fn add_custom_folder(path: String) -> Result<(), String> {
+    let folder_path = PathBuf::from(&path);
+    if !folder_path.exists() || !folder_path.is_dir() {
+        return Err(format!("路径不存在或不是文件夹: {}", path));
+    }
+
+    let display_name = folder_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| path.clone());
+
+    // 生成唯一 ID（基于路径字符串的简单哈希）
+    let hash: u64 = path.as_bytes().iter().enumerate()
+        .fold(0u64, |acc, (i, &b)| acc.wrapping_add((b as u64).wrapping_mul(i as u64 + 1)));
+    let id = format!("custom_{:x}", hash);
+
+    let mut custom = load_custom_folders();
+    // 防止重复添加
+    if custom.iter().any(|c| c.path.to_lowercase() == path.to_lowercase()) {
+        return Err("该文件夹已在列表中".to_string());
+    }
+
+    custom.push(CustomFolderEntry {
+        id,
+        path,
+        display_name,
+    });
+
+    save_custom_folders(&custom)
+}
+
+/// 删除自定义文件夹
+#[tauri::command]
+fn remove_custom_folder(id: String) -> Result<(), String> {
+    let mut custom = load_custom_folders();
+    let before = custom.len();
+    custom.retain(|c| c.id != id);
+    if custom.len() == before {
+        return Err("未找到该自定义文件夹".to_string());
+    }
+    save_custom_folders(&custom)
 }
 
 /// 恢复大文件夹（从 Junction 恢复到原位置）
+/// 耗时部分在后台线程执行，通过 "large-folder-restore-complete" 事件通知前端
 #[tauri::command]
-fn restore_large_folder(junction_path: String) -> Result<MigrationResult, String> {
+fn restore_large_folder(
+    junction_path: String,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
     #[cfg(windows)]
     {
-        let junction = Path::new(&junction_path);
-        
-        // 检查是否为 Junction
-        if !is_junction(junction) {
-            return Ok(MigrationResult {
-                success: false,
-                message: "该路径不是一个符号链接，无法恢复".to_string(),
-                new_path: None,
-            });
+        let junction = PathBuf::from(&junction_path);
+
+        // 快速校验（同步执行）
+        if !is_junction(&junction) {
+            return Err("该路径不是一个符号链接，无法恢复".to_string());
         }
-        
-        // 获取 Junction 目标路径
-        let target_path = match get_junction_target(junction) {
+
+        let target_path = match get_junction_target(&junction) {
             Some(target) => PathBuf::from(target),
-            None => {
-                return Ok(MigrationResult {
-                    success: false,
-                    message: "无法读取符号链接的目标路径".to_string(),
-                    new_path: None,
-                });
-            }
+            None => return Err("无法读取符号链接的目标路径".to_string()),
         };
-        
-        // 检查目标路径是否存在
+
         if !target_path.exists() {
-            return Ok(MigrationResult {
-                success: false,
-                message: format!("目标路径不存在: {}", target_path.to_string_lossy()),
-                new_path: None,
-            });
+            return Err(format!("目标路径不存在: {}", target_path.to_string_lossy()));
         }
-        
-        // ========== 步骤 1: 删除 Junction ==========
-        fs::remove_dir(&junction_path).map_err(|e| {
-            format!("无法删除符号链接: {}", e)
-        })?;
-        
-        // ========== 步骤 2: 移动文件夹回原位置 ==========
-        let mut options = CopyOptions::new();
-        options.overwrite = false;
-        options.copy_inside = false;
-        
-        // 获取原路径的父目录
-        let original_parent = junction.parent()
-            .ok_or("无法获取原路径的父目录")?;
-        
-        move_dir(&target_path, original_parent, &options).map_err(|e| {
-            // 移动失败，尝试恢复 Junction
-            let _ = symlink_dir(&target_path, junction);
-            format!("移动文件夹失败: {}。已恢复符号链接。", e)
-        })?;
-        
-        // ========== 步骤 3: 更新迁移记录状态 ==========
-        if let Err(e) = update_migration_record_status(&junction_path, "restored") {
-            eprintln!("警告: 更新迁移记录状态失败: {}", e);
-        }
-        
-        Ok(MigrationResult {
-            success: true,
-            message: format!("恢复成功！文件夹已恢复到 {}", junction_path),
-            new_path: Some(junction_path.clone()),
-        })
+
+        // 耗时 IO（删除 Junction + 移动文件夹）放入独立线程
+        let handle = app_handle.clone();
+        let target_path_str = target_path.to_string_lossy().to_string();
+        std::thread::spawn(move || {
+            let result = restore_large_folder_inner(&junction, &target_path_str);
+            let event = match &result {
+                Ok(r) => LargeFolderRestoreCompleteEvent {
+                    success: r.success,
+                    message: r.message.clone(),
+                    new_path: r.new_path.clone(),
+                },
+                Err(e) => LargeFolderRestoreCompleteEvent {
+                    success: false,
+                    message: e.clone(),
+                    new_path: None,
+                },
+            };
+            let _ = handle.emit("large-folder-restore-complete", event);
+        });
+
+        Ok(())
     }
-    
+
     #[cfg(not(windows))]
     {
-        Ok(MigrationResult {
-            success: false,
-            message: "此功能仅支持 Windows 系统".to_string(),
-            new_path: None,
-        })
+        Err("此功能仅支持 Windows 系统".to_string())
     }
+}
+
+/// 恢复大文件夹的内部逻辑（在后台线程中执行）
+/// 包含：删除 Junction → 移动文件夹 → 更新迁移记录
+fn restore_large_folder_inner(
+    junction_path: &Path,
+    target_str: &str,
+) -> Result<MigrationResult, String> {
+    let target_path = PathBuf::from(target_str);
+    let junction = junction_path;
+
+    // 步骤 1: 删除 Junction
+    fs::remove_dir(junction).map_err(|e| {
+        format!("无法删除符号链接: {}", e)
+    })?;
+
+    // 步骤 2: 移动文件夹回原位置
+    let mut options = CopyOptions::new();
+    options.overwrite = false;
+    options.copy_inside = false;
+
+    let original_parent = junction.parent()
+        .ok_or("无法获取原路径的父目录")?;
+
+    move_dir(&target_path, original_parent, &options).map_err(|e| {
+        // 移动失败，尝试恢复 Junction（回滚）
+        #[cfg(windows)]
+        let _ = symlink_dir(&target_path, junction);
+        format!("移动文件夹失败: {}。已恢复符号链接。", e)
+    })?;
+
+    // 步骤 3: 更新迁移记录状态
+    let junction_str = junction.to_string_lossy().to_string();
+    if let Err(e) = update_migration_record_status(&junction_str, "restored") {
+        eprintln!("警告: 更新迁移记录状态失败: {}", e);
+    }
+
+    Ok(MigrationResult {
+        success: true,
+        message: format!("恢复成功！文件夹已恢复到 {}", junction_str),
+        new_path: Some(junction_str),
+    })
 }
 
 /// 获取已安装应用列表
@@ -1748,9 +1772,10 @@ pub fn run() {
             restore_app,
             open_folder,
             get_large_folders,
-            get_special_folders_status,
             migrate_large_folder,
             migrate_special_folder,
+            add_custom_folder,
+            remove_custom_folder,
             restore_large_folder,
             check_link_status,
             clean_ghost_links,

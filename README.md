@@ -60,7 +60,9 @@ Windows 用户经常面临以下困扰：
 │  │  • restore_app             恢复应用         │               │
 │  │  • open_folder             打开文件夹       │               │
 │  │  • get_migration_history   获取迁移历史     │               │
-│  │  • get_large_folders       获取大文件夹列表 │               │
+│  │  • get_large_folders       获取大文件夹列表（统一API）│       │
+│  │  • add_custom_folder       添加自定义文件夹 │               │
+│  │  • remove_custom_folder    移除自定义文件夹 │               │
 │  │  • migrate_large_folder    迁移大文件夹     │               │
 │  │  • restore_large_folder    恢复大文件夹     │               │
 │  ├──────────────────────────────────────────┤               │
@@ -112,7 +114,7 @@ orbit-file/
 │   │       ├── scanner.rs       # 注册表/文件系统扫描
 │   │       ├── migration.rs     # 迁移引擎
 │   │       ├── uninstaller.rs   # 卸载/残留扫描/强制删除
-│   │       ├── detector.rs      # 特殊目录检测
+│   │       ├── detector.rs      # 特殊目录动态检测
 │   │       └── log_macros.rs    # 统一日志宏
 │   ├── capabilities/
 │   │   └── default.json         # Tauri 权限配置
@@ -230,23 +232,23 @@ OrbitFile 使用 Windows Win32 API 提取应用的真实图标：
 - 按钮立即切换为 loading 态（spinner + "还原中"）
 - 还原完成/失败后自动恢复，配合 Toast 通知结果
 
-### 数据迁移迁移
+### 数据迁移
 
-支持迁移系统文件夹和办公软件数据目录：
+支持迁移系统文件夹、应用数据和自定义文件夹：
 
 **系统文件夹：**
-- 桌面 (Desktop)
-- 文档 (Documents)
-- 下载 (Downloads)
-- 图片 (Pictures)
-- 视频 (Videos)
+- 桌面 (Desktop)、文档 (Documents)、下载 (Downloads)、图片 (Pictures)、视频 (Videos)
 
-**办公软件数据：**
-- 微信 (`%USERPROFILE%\Documents\WeChat Files`)
-- 企业微信 (`%USERPROFILE%\Documents\WXWork`)
-- QQ (`%USERPROFILE%\Documents\Tencent Files`)
-- 钉钉 (`%APPDATA%\DingTalk`)
-- 飞书 (`%APPDATA%\LarkShell` 或 `%LOCALAPPDATA%\LarkShell`)
+**应用数据（动态检测路径，含注册表/配置文件回退）：**
+- 微信 / 企业微信 / QQ / 钉钉 / 飞书（含 6 个候选路径）
+- Chrome 缓存 / Edge 缓存 / VS Code 扩展 / npm 全局包
+
+**新功能：**
+- **统一扫描 API** — 后端单命令返回全部文件夹，动态检测路径优先，硬编码兜底
+- **异步大小计算** — 先返回列表（size=0），后台线程计算后通过 Event 增量推送
+- **自定义文件夹** — 支持手动添加任意文件夹，持久化记忆
+- **迁移进度 + 取消** — `migrate_large_folder` 复用核心迁移引擎，支持实时进度条和取消操作
+- **系统文件夹进程预检** — 迁移前检测 explorer.exe 占用，弹出警告确认对话框
 
 **安全特性：**
 - 系统文件夹迁移前显示风险警告
