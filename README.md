@@ -48,18 +48,21 @@ Windows 用户经常面临以下困扰：
 │  Backend (Rust)                                             │
 │  ┌──────────────────────────────────────────┐               │
 │  │  Commands                                 │               │
-│  │  • get_installed_apps    扫描已安装应用   │               │
-│  │  • get_disk_usage        获取所有磁盘信息 │               │
-│  │  • migrate_app           执行应用迁移     │               │
-│  │  • uninstall_application 执行官方卸载     │               │
-│  │  • scan_app_residue      扫描卸载残留     │               │
-│  │  • execute_cleanup       执行安全清理     │               │
-│  │  • restore_app           恢复应用         │               │
-│  │  • open_folder           打开文件夹       │               │
-│  │  • get_migration_history 获取迁移历史     │               │
-│  │  • get_large_folders     获取大文件夹列表 │               │
-│  │  • migrate_large_folder  迁移大文件夹     │               │
-│  │  • restore_large_folder  恢复大文件夹     │               │
+│  │  • get_installed_apps      扫描已安装应用   │               │
+│  │  • get_disk_usage          获取所有磁盘信息 │               │
+│  │  • migrate_app             执行应用迁移     │               │
+│  │  • cancel_migration        取消迁移         │               │
+│  │  • preview_uninstall       预览卸载命令     │               │
+│  │  • uninstall_application   执行官方卸载     │               │
+│  │  • force_remove_application 强制删除应用    │               │
+│  │  • scan_app_residue        扫描卸载残留     │               │
+│  │  • execute_cleanup         执行安全清理     │               │
+│  │  • restore_app             恢复应用         │               │
+│  │  • open_folder             打开文件夹       │               │
+│  │  • get_migration_history   获取迁移历史     │               │
+│  │  • get_large_folders       获取大文件夹列表 │               │
+│  │  • migrate_large_folder    迁移大文件夹     │               │
+│  │  • restore_large_folder    恢复大文件夹     │               │
 │  ├──────────────────────────────────────────┤               │
 │  │  Core Logic                               │               │
 │  │  • 注册表扫描 (winreg)                    │               │
@@ -81,16 +84,20 @@ Windows 用户经常面临以下困扰：
 orbit-file/
 ├── src/                          # 前端源码
 │   ├── components/               # React 组件
-│   │   ├── AppList.tsx          # 应用列表
+│   │   ├── AppList.tsx          # 应用列表（含批量选择）
+│   │   ├── CleanupModal.tsx     # 残留清理弹窗
 │   │   ├── DiskUsageBar.tsx     # 磁盘使用率
+│   │   ├── FilterSelect.tsx     # 下拉筛选组件
 │   │   ├── MigrationModal.tsx   # 迁移进度弹窗
 │   │   ├── TabBar.tsx           # 顶部导航
 │   │   └── Toast.tsx            # 通知组件
 │   ├── pages/                    # 页面
-│   │   ├── AppMigration.tsx     # 应用迁移页
+│   │   ├── AppMigration.tsx     # 应用迁移页（还原/卸载/批量）
 │   │   ├── LargeFolders.tsx     # 数据迁移页
 │   │   ├── MigrationHistory.tsx # 迁移历史页
 │   │   └── Settings.tsx         # 设置页
+│   ├── utils/                    # 工具函数
+│   │   └── logger.ts            # 统一日志工具
 │   ├── styles/                   # 样式系统
 │   │   ├── variables.css        # CSS 变量定义
 │   │   └── components.css       # 通用组件样式
@@ -99,7 +106,14 @@ orbit-file/
 │   └── types.ts                  # TypeScript 类型定义
 ├── src-tauri/                    # Rust 后端
 │   ├── src/
-│   │   └── lib.rs               # 核心逻辑和命令
+│   │   ├── lib.rs               # 核心命令注册
+│   │   └── app_manager/         # 应用管理模块
+│   │       ├── mod.rs
+│   │       ├── scanner.rs       # 注册表/文件系统扫描
+│   │       ├── migration.rs     # 迁移引擎
+│   │       ├── uninstaller.rs   # 卸载/残留扫描/强制删除
+│   │       ├── detector.rs      # 特殊目录检测
+│   │       └── log_macros.rs    # 统一日志宏
 │   ├── capabilities/
 │   │   └── default.json         # Tauri 权限配置
 │   ├── icons/                    # 应用图标
@@ -201,6 +215,21 @@ OrbitFile 使用 Windows Win32 API 提取应用的真实图标：
 - 系统盘（C:）优先显示并高亮
 - 根据使用率显示不同颜色（绿色 < 70% < 黄色 < 90% < 红色）
 
+### 批量迁移
+
+支持多选应用一键批量迁移：
+
+- 每行 hover 显示复选框，顶部「全选未迁移」快捷操作
+- 选中后显示浮动「批量迁移 (N)」按钮
+- 选择统一目标目录后按序自动执行，单应用迁移失败不影响后续
+- 完成后汇总通知（成功/失败数量）
+
+### 还原 Loading 反馈
+
+点击已迁移应用的「还原」按钮时：
+- 按钮立即切换为 loading 态（spinner + "还原中"）
+- 还原完成/失败后自动恢复，配合 Toast 通知结果
+
 ### 数据迁移迁移
 
 支持迁移系统文件夹和办公软件数据目录：
@@ -226,14 +255,30 @@ OrbitFile 使用 Windows Win32 API 提取应用的真实图标：
 
 ### 强力卸载与数字残留扫描
 
-OrbitFile 的强力卸载采用“官方卸载优先 + 手动确认扫描 + 安全清理”流程：
+OrbitFile 的强力卸载对标 Geek Uninstaller 等专业工具，提供完整的卸载 → 残留扫描 → 安全清理链路：
 
-1. 先执行应用官方卸载命令，并等待进程完成（必要时会触发提权执行）。
-2. 卸载完成后由用户手动触发残留扫描，避免在安装器尚未落盘时误判。
-3. 后端基于应用名、发布商、安装路径等指纹定位数字残留（文件系统与注册表）。
-4. 清理阶段使用系统目录黑名单与注册表安全校验，阻断高风险路径删除。
+**卸载命令执行：**
+1. 预览卸载命令（`preview_uninstall`），在确认对话框中展示
+2. 三级回退执行策略：直接 exe → cmd /C → start /wait
+3. 自动检测权限不足 → PowerShell Start-Process -Verb RunAs 提权重试
+4. 静默参数追加（/S /silent /verysilent /qn /quiet）
+5. 轮询注册表确认卸载完成（最多 240×500ms）
 
-该机制可覆盖常规卸载器常见遗漏（AppData 日志/缓存、注册表残留），同时尽量保证系统稳定性。
+**强制删除（Force Remove）：**
+- 当应用卸载程序损坏/缺失时，自动提供强制删除选项
+- 直接删除安装目录（三级回退：直接删 → 清除只读 → takeown + icacls）
+- 清理注册表 Uninstall 键
+
+**残留扫描（三路并行）：**
+1. 文件系统扫描：AppData / LocalAppData / ProgramData / 安装路径，深度 5
+2. Uninstall 注册表扫描：HKLM + HKCU × 3 路径
+3. 发布商路径扫描：Software\\<Publisher> × 4 路径（HKLM/HKCU × 普通/WOW6432Node）
+4. 文件关联扫描：Software\\Classes\\Applications\\<appname> × 2 路径
+
+**安全清理：**
+- 系统目录黑名单（Windows、System32 等）
+- 注册表安全校验（拒绝 Microsoft/Windows、要求 ≥3 级路径）
+- 批量选中 + 一键清理，按体积降序排列
 
 ### 设置持久化
 

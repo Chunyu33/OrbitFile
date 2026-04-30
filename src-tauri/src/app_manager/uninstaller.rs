@@ -365,6 +365,141 @@ pub fn preview_uninstall(input: UninstallInput) -> Result<UninstallPreview, Stri
     }
 }
 
+/// 强制删除（跳过卸载器）
+/// 用于卸载程序已损坏/缺失的场景，直接删除安装目录并清理注册表
+/// 返回被删除的路径列表，供前端决定是否继续残留扫描
+pub fn force_remove_application(input: UninstallInput) -> Result<UninstallResult, String> {
+    #[cfg(windows)]
+    {
+        let (deleted_files, deleted_registry, install_location) =
+            execute_force_remove(&input)?;
+
+        let parts: Vec<&str> = vec![
+            if deleted_files { Some("文件已删除") } else { None },
+            if deleted_registry { Some("注册表已清理") } else { None },
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+
+        Ok(UninstallResult {
+            success: true,
+            message: format!(
+                "强制删除完成：{}。{}",
+                parts.join("，"),
+                if install_location.is_some() {
+                    "建议运行残留扫描彻底清理。"
+                } else {
+                    ""
+                }
+            ),
+            command: Some("force_remove".to_string()),
+            leftovers: Vec::new(),
+        })
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = input;
+        Ok(UninstallResult {
+            success: false,
+            message: "强制删除仅支持 Windows".to_string(),
+            command: None,
+            leftovers: Vec::new(),
+        })
+    }
+}
+
+#[cfg(windows)]
+fn execute_force_remove(input: &UninstallInput) -> Result<(bool, bool, Option<String>), String> {
+    let mut deleted_files = false;
+    let mut deleted_registry = false;
+    let mut install_location: Option<String> = None;
+
+    // 按 registry_path 定位安装目录
+    if let Some(registry_path) = input.registry_path.as_ref() {
+        if let Some((hkey, sub_path)) = parse_registry_path(registry_path) {
+            // 读取安装路径（用于删除文件）
+            if let Ok(key) = RegKey::predef(hkey).open_subkey_with_flags(sub_path, KEY_READ) {
+                let loc: String = key.get_value("InstallLocation").unwrap_or_default();
+                let sanitized = sanitize_search_text(&loc);
+                if !sanitized.is_empty() {
+                    install_location = Some(sanitized);
+                }
+            }
+
+            // 删除注册表键
+            if is_safe_registry_cleanup_target(hkey, sub_path, &[]) {
+                deleted_registry = RegKey::predef(hkey)
+                    .delete_subkey_all(sub_path)
+                    .is_ok();
+            }
+        }
+    }
+
+    // 按 app_id 回退查找安装目录和注册表
+    if let Some(app_id) = input.app_id.as_ref() {
+        let registry_roots: [(HKEY, &str); 3] = [
+            (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+            (HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        ];
+
+        for (hkey, root) in registry_roots {
+            let uninstall_key = match RegKey::predef(hkey).open_subkey_with_flags(root, KEY_READ) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            for subkey_name in uninstall_key.enum_keys().filter_map(|x| x.ok()) {
+                let subkey = match uninstall_key.open_subkey_with_flags(&subkey_name, KEY_READ) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                let dn: String = subkey.get_value("DisplayName").unwrap_or_default();
+                if dn.trim().to_lowercase() != app_id.trim().to_lowercase() {
+                    continue;
+                }
+
+                // 读取安装路径
+                if install_location.is_none() {
+                    let loc: String = subkey.get_value("InstallLocation").unwrap_or_default();
+                    let sanitized = sanitize_search_text(&loc);
+                    if !sanitized.is_empty() {
+                        install_location = Some(sanitized);
+                    }
+                }
+
+                // 删除注册表键（如果还没删过）
+                if !deleted_registry {
+                    let full_path = format!(r"{}\{}", root, subkey_name);
+                    if is_safe_registry_cleanup_target(hkey, &full_path, &[]) {
+                        deleted_registry = RegKey::predef(hkey)
+                            .delete_subkey_all(&full_path)
+                            .is_ok();
+                    }
+                }
+                break; // 找到匹配项，退出内层循环
+            }
+        }
+    }
+
+    // 删除安装目录
+    if let Some(ref loc) = install_location {
+        let install_path = Path::new(loc);
+        if install_path.exists() && !is_blacklisted_path(install_path) {
+            force_delete_path(install_path)?;
+            deleted_files = true;
+        }
+    }
+
+    if !deleted_files && !deleted_registry {
+        return Err("未找到可清理的文件或注册表项。应用可能已被完全卸载。".to_string());
+    }
+
+    Ok((deleted_files, deleted_registry, install_location))
+}
+
 /// 强力卸载入口
 /// 1) 解析并执行卸载命令（等待卸载进程退出）
 /// 2) 返回成功后由前端手动确认是否触发残留扫描
@@ -1126,6 +1261,142 @@ fn scan_registry_residue(
             }
 
             let registry_path = format!(r"{}\{}", hive_name, full_sub_path);
+            let canonical = registry_path.to_lowercase();
+            if seen.contains(&canonical) {
+                continue;
+            }
+
+            seen.insert(canonical);
+            output.push(LeftoverItem {
+                path: registry_path,
+                item_type: "Registry".to_string(),
+                size_mb: 0.0,
+                selected: false,
+            });
+        }
+    }
+
+    // 扩展扫描：发布商路径（Software\<Publisher>）
+    scan_publisher_registry_residue(context, output, seen);
+
+    // 扩展扫描：文件关联（Software\Classes\Applications\<app_name>）
+    scan_classes_registry_residue(context, output, seen);
+}
+
+/// 扫描发布商注册表路径残留
+/// Geek 等专业卸载器会扫描这些路径，大量应用残留存在于 Software\<Publisher> 下
+#[cfg(windows)]
+fn scan_publisher_registry_residue(
+    context: &StrictScanContext,
+    output: &mut Vec<LeftoverItem>,
+    seen: &mut HashSet<String>,
+) {
+    let publisher = match context.publisher_name.as_ref() {
+        Some(p) => p.clone(),
+        None => return,
+    };
+    if publisher.is_empty() {
+        return;
+    }
+
+    let publisher_roots: [(HKEY, &str, &str); 4] = [
+        (HKEY_LOCAL_MACHINE, "HKLM", r"SOFTWARE"),
+        (HKEY_LOCAL_MACHINE, "HKLM", r"SOFTWARE\WOW6432Node"),
+        (HKEY_CURRENT_USER, "HKCU", r"SOFTWARE"),
+        (HKEY_CURRENT_USER, "HKCU", r"SOFTWARE\WOW6432Node"),
+    ];
+
+    for (hkey, hive_name, root_path) in publisher_roots {
+        let _root = match RegKey::predef(hkey).open_subkey_with_flags(root_path, KEY_READ) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        // 尝试打开 Software\<Publisher>
+        let publisher_path = format!(r"{}\{}", root_path, publisher);
+        let publisher_key = match RegKey::predef(hkey).open_subkey_with_flags(&publisher_path, KEY_READ) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        // 扫描发布商下的子键（如 <AppName>、<Version>）
+        for subkey_name in publisher_key.enum_keys().filter_map(|x| x.ok()) {
+            let full_path = format!(r"{}\{}", publisher_path, subkey_name);
+            let registry_path = format!(r"{}\{}", hive_name, full_path);
+            let canonical = registry_path.to_lowercase();
+            if seen.contains(&canonical) {
+                continue;
+            }
+
+            // 匹配检查：子键名是否与应用名或安装路径相关
+            let subkey_lower = subkey_name.to_lowercase();
+            let matches_app = subkey_lower.contains(&context.app_folder_name)
+                || context.app_folder_name.contains(&subkey_lower);
+            let matches_install = context
+                .install_location
+                .as_ref()
+                .map(|loc| {
+                    loc.split('\\')
+                        .last()
+                        .map(|last| subkey_lower.contains(last) || last.to_lowercase().contains(&subkey_lower))
+                        .unwrap_or(false)
+                })
+                .unwrap_or(false);
+
+            if !matches_app && !matches_install {
+                continue;
+            }
+
+            // 验证子键可打开（成功则继续，失败则跳过）
+            if RegKey::predef(hkey).open_subkey_with_flags(&full_path, KEY_READ).is_err() {
+                continue;
+            }
+
+            // 安全校验
+            if !is_safe_registry_cleanup_target(hkey, &full_path, &[publisher.clone()]) {
+                continue;
+            }
+
+            seen.insert(canonical);
+            output.push(LeftoverItem {
+                path: registry_path,
+                item_type: "Registry".to_string(),
+                size_mb: 0.0,
+                selected: false,
+            });
+        }
+    }
+}
+
+/// 扫描 Classes 文件关联残留
+/// Windows 应用常在 Software\Classes\Applications\<appname.exe> 注册文件关联
+#[cfg(windows)]
+fn scan_classes_registry_residue(
+    context: &StrictScanContext,
+    output: &mut Vec<LeftoverItem>,
+    seen: &mut HashSet<String>,
+) {
+    let classes_roots: [(HKEY, &str, &str); 2] = [
+        (HKEY_LOCAL_MACHINE, "HKLM", r"SOFTWARE\Classes\Applications"),
+        (HKEY_CURRENT_USER, "HKCU", r"SOFTWARE\Classes\Applications"),
+    ];
+
+    for (hkey, hive_name, root_path) in classes_roots {
+        let root = match RegKey::predef(hkey).open_subkey_with_flags(root_path, KEY_READ) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+
+        for subkey_name in root.enum_keys().filter_map(|x| x.ok()) {
+            let subkey_lower = subkey_name.to_lowercase();
+
+            // 匹配：子键包含应用目录名（如 appname.exe）
+            if !subkey_lower.contains(&context.app_folder_name) {
+                continue;
+            }
+
+            let full_path = format!(r"{}\{}", root_path, subkey_name);
+            let registry_path = format!(r"{}\{}", hive_name, full_path);
             let canonical = registry_path.to_lowercase();
             if seen.contains(&canonical) {
                 continue;

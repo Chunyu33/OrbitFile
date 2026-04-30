@@ -156,8 +156,9 @@ export default function AppMigration() {
 
   // 强力卸载流程
   async function handleUninstall(app: InstalledApp) {
-    // 先预览卸载命令，在确认对话框中展示
+    // 先预览卸载命令
     let previewCommands: string[] = [];
+    let previewFailed = false;
     try {
       const preview = await invoke<UninstallPreview>('preview_uninstall', {
         input: {
@@ -167,37 +168,60 @@ export default function AppMigration() {
       });
       previewCommands = preview.commands;
     } catch {
-      // 预览失败不阻塞流程
-    }
-
-    const commandLines = previewCommands.length > 0
-      ? `\n\n即将执行的卸载命令：\n${previewCommands.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}`
-      : '';
-
-    const confirmed = await confirm(
-      `即将启动 ${app.display_name} 的卸载程序。\n\n此操作可能删除应用及其相关组件，是否继续？${commandLines}`,
-      {
-        title: '确认强力卸载',
-        kind: 'warning',
-        okLabel: '继续卸载',
-        cancelLabel: '取消',
-      }
-    );
-
-    if (!confirmed) {
-      return;
+      previewFailed = true;
     }
 
     const currentUninstallKey = `${app.display_name}|${app.registry_path}`;
+
+    // 卸载程序不可用（损坏/缺失）→ 走强制删除流程
+    if (previewFailed || previewCommands.length === 0) {
+      const forceConfirm = await confirm(
+        `${app.display_name} 的卸载程序不可用（可能已损坏或被删除）。\n\n是否执行强制删除？将直接移除安装目录和注册表项。`,
+        { title: '强制删除', kind: 'warning', okLabel: '强制删除', cancelLabel: '取消' }
+      );
+      if (!forceConfirm) return;
+
+      try {
+        setUninstallingKey(currentUninstallKey);
+        const result = await invoke<UninstallResult>('force_remove_application', {
+          input: { app_id: app.display_name, registry_path: app.registry_path },
+        });
+        if (result.success) {
+          showToast(result.message, 'success');
+          const confirmScan = await confirm(
+            `${app.display_name} 强制删除完成。\n\n是否扫描残留文件？`,
+            { title: '扫描残留', kind: 'warning', okLabel: '开始扫描', cancelLabel: '稍后再说' }
+          );
+          if (confirmScan) {
+            await handleScanResidue(app);
+          } else {
+            await handleRefresh();
+          }
+        } else {
+          showToast(result.message || '强制删除失败', 'error');
+        }
+      } catch (error) {
+        showToast(`强制删除失败: ${error}`, 'error');
+      } finally {
+        setUninstallingKey(null);
+      }
+      return;
+    }
+
+    // 正常卸载流程
+    const commandLines = `\n\n即将执行的卸载命令：\n${previewCommands.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}`;
+
+    const confirmed = await confirm(
+      `即将启动 ${app.display_name} 的卸载程序。\n\n此操作可能删除应用及其相关组件，是否继续？${commandLines}`,
+      { title: '确认强力卸载', kind: 'warning', okLabel: '继续卸载', cancelLabel: '取消' }
+    );
+    if (!confirmed) return;
 
     try {
       setUninstallingKey(currentUninstallKey);
 
       const result = await invoke<UninstallResult>('uninstall_application', {
-        input: {
-          app_id: app.display_name,
-          registry_path: app.registry_path,
-        },
+        input: { app_id: app.display_name, registry_path: app.registry_path },
       });
 
       if (result.success) {

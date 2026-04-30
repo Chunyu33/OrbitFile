@@ -1113,6 +1113,13 @@ fn preview_uninstall(input: app_manager::uninstaller::UninstallInput) -> Result<
     app_manager::uninstaller::preview_uninstall(input)
 }
 
+/// 强制删除应用（跳过卸载器）
+/// 用于卸载程序已损坏/缺失的场景
+#[tauri::command]
+fn force_remove_application(input: app_manager::uninstaller::UninstallInput) -> Result<app_manager::uninstaller::UninstallResult, String> {
+    app_manager::uninstaller::force_remove_application(input)
+}
+
 /// 启动应用卸载流程
 /// 支持按 app_id 或 registry_path 触发卸载
 #[tauri::command]
@@ -1732,6 +1739,7 @@ pub fn run() {
             migrate_app,
             cancel_migration,
             preview_uninstall,
+            force_remove_application,
             uninstall_application,
             scan_app_residue,
             execute_cleanup,

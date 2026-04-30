@@ -349,8 +349,8 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
     <div className="h-full flex flex-col">
       {/* 搜索栏与筛选器 - 紧凑设计 */}
       <div className="flex items-center gap-2 mb-4 p-2 rounded-xl bg-[var(--bg-card)]/80 backdrop-blur-sm shadow-[0_6px_16px_rgba(15,23,42,0.05)] dark:shadow-[0_8px_22px_rgba(0,0,0,0.25)]">
-        {/* 搜索框: flex-1 + min-w-0 填满剩余空间但不溢出，max-w 防止过宽 */}
-        <div className="relative flex-1 min-w-0 max-w-[360px]">
+        {/* 搜索框: flex-[3] 占 3/5 宽度，min-w-0 防溢出 */}
+        <div className="relative flex-[3] min-w-0">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
           <input
             type="text"
@@ -361,7 +361,8 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
           />
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        {/* 筛选区: flex-[2] 占 2/5 宽度，shrink-0 防止被搜索框挤压 */}
+        <div className="flex items-center gap-2 flex-[2] shrink-0">
           {/* 迁移状态筛选 */}
           <FilterSelect
             value={migrationFilter}
