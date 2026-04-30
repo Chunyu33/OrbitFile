@@ -53,6 +53,14 @@ export interface UninstallResult {
 }
 
 /**
+ * 卸载命令预览接口
+ * 对应 Rust 后端的 UninstallPreview 结构体
+ */
+export interface UninstallPreview {
+  commands: string[];
+}
+
+/**
  * 清理结果接口
  * 对应 Rust 后端的 CleanupResult 结构体
  */
@@ -167,13 +175,28 @@ export interface ProcessLockResult {
 /**
  * 迁移步骤枚举
  */
-export type MigrationStep = 
+export type MigrationStep =
   | 'idle'           // 空闲状态
   | 'checking'       // 检查进程锁
+  | 'counting'       // 扫描文件
   | 'copying'        // 复制文件
+  | 'verifying'      // 校验完整性
   | 'linking'        // 创建链接
   | 'success'        // 迁移成功
   | 'error';         // 迁移失败
+
+/**
+ * 迁移进度事件接口
+ * 对应 Rust 后端的 MigrationProgressEvent 结构体
+ * 通过 Tauri Event "migration-progress" 推送
+ */
+export interface MigrationProgressEvent {
+  percent: number;
+  step: string;
+  message: string;
+  copied_size: number;
+  total_size: number;
+}
 
 /**
  * 迁移记录类型枚举

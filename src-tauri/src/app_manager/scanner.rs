@@ -11,9 +11,18 @@
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use crate::{InstalledApp, ProcessLockResult};
 use sysinfo::System;
+
+/// 注册表扫描结果缓存 TTL（秒）
+const REGISTRY_CACHE_TTL_SECS: u64 = 30;
+
+lazy_static::lazy_static! {
+    static ref REGISTRY_CACHE: std::sync::Mutex<Option<(Instant, Vec<InstalledApp>)>> =
+        std::sync::Mutex::new(None);
+}
 
 #[cfg(windows)]
 use winreg::enums::{HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE};
@@ -325,9 +334,19 @@ fn collect_filesystem_roots() -> (Vec<PathBuf>, Vec<PathBuf>) {
 
 /// 获取已安装应用列表
 /// 扫描 Windows 注册表中的 Uninstall 键，并补充文件系统中的便携/绿色应用
+/// 结果会被缓存 `REGISTRY_CACHE_TTL_SECS` 秒，避免频繁刷新重复扫描注册表
 pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
     #[cfg(windows)]
     {
+        // 命中缓存则直接返回（含图标）
+        if let Ok(cache) = REGISTRY_CACHE.lock() {
+            if let Some((timestamp, cached)) = cache.as_ref() {
+                if timestamp.elapsed().as_secs() < REGISTRY_CACHE_TTL_SECS {
+                    return Ok(cached.clone());
+                }
+            }
+        }
+
         let mut apps: Vec<InstalledApp> = Vec::new();
 
         // 定义需要扫描的注册表路径
@@ -437,11 +456,29 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
         // 按应用名称排序
         apps.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
 
-        // 提取图标（带缓存）
-        for app in &mut apps {
-            if !app.display_icon.is_empty() {
-                app.icon_base64 = crate::extract_icon_to_base64(&app.display_icon);
-            }
+        // 提取图标（并行：避免阻塞主线程，带独立路径缓存）
+        if !apps.is_empty() {
+            let num_threads = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4);
+            let chunk_size = ((apps.len() + num_threads - 1) / num_threads).max(1);
+            std::thread::scope(|s| {
+                for chunk in apps.chunks_mut(chunk_size) {
+                    s.spawn(move || {
+                        for app in chunk {
+                            if !app.display_icon.is_empty() {
+                                app.icon_base64 =
+                                    crate::extract_icon_to_base64(&app.display_icon);
+                            }
+                        }
+                    });
+                }
+            });
+        }
+
+        // 写入缓存
+        if let Ok(mut cache) = REGISTRY_CACHE.lock() {
+            *cache = Some((Instant::now(), apps.clone()));
         }
 
         Ok(apps)

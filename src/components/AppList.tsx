@@ -1,9 +1,9 @@
 // 应用列表组件
 
-import { Package, Search, FolderOpen, Link2 } from 'lucide-react';
+import { Package, Search, FolderOpen, Link2, Check, ArrowRightLeft } from 'lucide-react';
 
 import { InstalledApp } from '../types';
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useDeferredValue } from 'react';
 import FilterSelect from './FilterSelect';
 
 // 迁移状态筛选选项
@@ -31,7 +31,15 @@ interface AppListProps {
   onUninstall: (app: InstalledApp) => void;
   onOpenFolder?: (app: InstalledApp) => void;
   uninstallingKey?: string | null;
+  restoringKey?: string | null;
   migratedPaths?: string[];
+  // 批量迁移
+  selectedKeys?: Set<string>;
+  onToggleSelect?: (app: InstalledApp) => void;
+  onSelectAll?: () => void;
+  onBatchMigrate?: () => void;
+  batchMigrating?: boolean;
+  batchProgress?: { current: number; total: number };
 }
 
 // 格式化文件大小
@@ -89,26 +97,51 @@ function AppIcon({ app, isMigrated }: { app: InstalledApp; isMigrated: boolean }
 }
 
 // 应用行组件
-function AppRow({ 
-  app, 
-  onMigrate, 
+function AppRow({
+  app,
+  onMigrate,
   onRestore,
   onUninstall,
   onOpenFolder,
   isUninstalling,
   isMigrated,
-}: { 
-  app: InstalledApp; 
+  isRestoring,
+  isSelected,
+  onToggleSelect,
+  showCheckbox,
+}: {
+  app: InstalledApp;
   onMigrate: (app: InstalledApp) => void;
   onRestore: (app: InstalledApp) => void;
   onUninstall: (app: InstalledApp) => void;
   onOpenFolder: (app: InstalledApp) => void;
   isUninstalling: boolean;
   isMigrated: boolean;
+  isRestoring: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (app: InstalledApp) => void;
+  showCheckbox?: boolean;
 }) {
   return (
     <div className="group relative rounded-xl bg-[var(--bg-card)] px-4 py-3 shadow-[0_1px_0_rgba(15,23,42,0.04),0_6px_18px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_10px_26px_rgba(15,23,42,0.1)] dark:shadow-[0_1px_0_rgba(0,0,0,0.28),0_8px_22px_rgba(0,0,0,0.28)] dark:hover:shadow-[0_12px_28px_rgba(0,0,0,0.36)]">
       <div className="flex items-center gap-3">
+        {/* 多选复选框：已迁移不可选；hover 或已选时显示 */}
+        {showCheckbox && !isMigrated && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onToggleSelect?.(app); }}
+            className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-all
+              ${isSelected
+                ? 'bg-[var(--color-primary)] border-[var(--color-primary)]'
+                : 'border-[var(--border-color)] opacity-0 group-hover:opacity-100 hover:border-[var(--color-primary)]'
+              }`}
+            title={isSelected ? '取消选择' : '选择应用'}
+          >
+            {isSelected && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+          </button>
+        )}
+        {/* 已迁移应用占位（保持对齐） */}
+        {showCheckbox && isMigrated && <div className="flex-shrink-0 w-5 h-5" />}
+
         {/* 迁移状态左边框 */}
         {isMigrated && (
           <span className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full bg-[var(--color-primary)]" />
@@ -160,9 +193,17 @@ function AppRow({
           {isMigrated ? (
             <button
               onClick={() => onRestore(app)}
-              className="h-8 min-w-[68px] px-3 text-[12px] font-medium rounded-md bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--color-primary)] transition-colors"
+              disabled={isRestoring}
+              className="h-8 min-w-[68px] px-3 text-[12px] font-medium rounded-md bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--color-primary)] transition-colors disabled:opacity-50"
             >
-              还原
+              {isRestoring ? (
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-3 h-3 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+                  还原中
+                </span>
+              ) : (
+                '还原'
+              )}
             </button>
           ) : (
             <button
@@ -205,7 +246,7 @@ function LoadingSkeleton() {
   );
 }
 
-export default function AppList({ apps, loading, onMigrate, onRestore, onUninstall, onOpenFolder, uninstallingKey = null, migratedPaths = [] }: AppListProps) {
+export default function AppList({ apps, loading, onMigrate, onRestore, onUninstall, onOpenFolder, uninstallingKey = null, restoringKey = null, migratedPaths = [], selectedKeys, onToggleSelect, onSelectAll, onBatchMigrate, batchMigrating = false, batchProgress }: AppListProps) {
   // 默认的打开目录实现（无外部回调时）
   const defaultOpenFolder = async (app: InstalledApp) => {
     try {
@@ -216,15 +257,19 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
     }
   };
   const handleOpenFolder = onOpenFolder ?? defaultOpenFolder;
-  const [searchQuery, setSearchQuery] = useState('');
+  const [inputQuery, setInputQuery] = useState('');
   const [migrationFilter, setMigrationFilter] = useState<MigrationFilter>('all');
   const [driveFilter, setDriveFilter] = useState<DriveFilter>('all');
+  // 仅用 useDeferredValue 分割"输入即时响应"与"过滤计算"——比双状态+useTransition 少一层渲染
+  const deferredSearchQuery = useDeferredValue(inputQuery);
+  const migratedPathSet = useMemo(
+    () => new Set(migratedPaths.map((path) => path.toLowerCase())),
+    [migratedPaths],
+  );
 
   // 检查应用是否已迁移
   const isAppMigrated = (app: InstalledApp): boolean => {
-    return migratedPaths.some(path => 
-      path.toLowerCase() === app.install_location.toLowerCase()
-    );
+    return migratedPathSet.has(app.install_location.toLowerCase());
   };
 
   // 提取所有盘符（用于显示“其他盘”的具体列表）
@@ -232,18 +277,19 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
   const otherDrives = useMemo(() => availableDrives.filter(d => d !== 'C'), [availableDrives]);
 
   const filteredApps = useMemo(() => {
+    const normalizedQuery = deferredSearchQuery.trim().toLowerCase();
+
     return apps.filter(app => {
       // 搜索关键词过滤
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase();
-        if (!app.display_name.toLowerCase().includes(query) &&
-            !app.install_location.toLowerCase().includes(query)) {
+      if (normalizedQuery) {
+        if (!app.display_name.toLowerCase().includes(normalizedQuery) &&
+            !app.install_location.toLowerCase().includes(normalizedQuery)) {
           return false;
         }
       }
       // 迁移状态过滤
       if (migrationFilter !== 'all') {
-        const migrated = isAppMigrated(app);
+        const migrated = migratedPathSet.has(app.install_location.toLowerCase());
         if (migrationFilter === 'migrated' && !migrated) return false;
         if (migrationFilter === 'not_migrated' && migrated) return false;
       }
@@ -255,13 +301,19 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
       }
       return true;
     });
-  }, [apps, searchQuery, migrationFilter, driveFilter, migratedPaths]);
+  }, [apps, deferredSearchQuery, migrationFilter, driveFilter, migratedPathSet]);
 
   const migrationOptions: { value: MigrationFilter; label: string }[] = [
     { value: 'all', label: '全部状态' },
     { value: 'migrated', label: '已迁移' },
     { value: 'not_migrated', label: '未迁移' },
   ];
+
+  // 可批量选择的数量（仅未迁移应用）
+  const selectableCount = useMemo(
+    () => filteredApps.filter(a => !isAppMigrated(a)).length,
+    [filteredApps, migratedPathSet],
+  );
 
   const driveOptions: { value: DriveFilter; label: string }[] = [
     { value: 'all', label: '全部盘' },
@@ -297,19 +349,19 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
     <div className="h-full flex flex-col">
       {/* 搜索栏与筛选器 - 紧凑设计 */}
       <div className="flex items-center gap-2 mb-4 p-2 rounded-xl bg-[var(--bg-card)]/80 backdrop-blur-sm shadow-[0_6px_16px_rgba(15,23,42,0.05)] dark:shadow-[0_8px_22px_rgba(0,0,0,0.25)]">
-        {/* 搜索框 */}
-        <div className="relative flex-1">
+        {/* 搜索框: flex-1 + min-w-0 填满剩余空间但不溢出，max-w 防止过宽 */}
+        <div className="relative flex-1 min-w-0 max-w-[360px]">
           <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
           <input
             type="text"
             placeholder="搜索应用..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
+            value={inputQuery}
+            onChange={(e) => setInputQuery(e.target.value)}
             className="w-full h-8 pl-8 pr-3 text-[13px] rounded-md border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--color-primary)] transition-colors"
           />
         </div>
 
-        <div className="flex items-center gap-2 shrink-1">
+        <div className="flex items-center gap-2 shrink-0">
           {/* 迁移状态筛选 */}
           <FilterSelect
             value={migrationFilter}
@@ -334,22 +386,62 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
         </div>
       </div>
 
+      {/* 批量操作栏 */}
+      {onToggleSelect && onSelectAll && onBatchMigrate && (
+        <div className="flex items-center gap-3 px-2 pb-2">
+          <button
+            onClick={onSelectAll}
+            className="flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)] hover:text-[var(--color-primary)] transition-colors"
+          >
+            <span className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+              selectableCount > 0 && selectedKeys && selectedKeys.size === selectableCount
+                ? 'bg-[var(--color-primary)] border-[var(--color-primary)]'
+                : 'border-[var(--border-color)]'
+            }`}>
+              {selectableCount > 0 && selectedKeys && selectedKeys.size === selectableCount && (
+                <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
+              )}
+            </span>
+            全选未迁移
+          </button>
+          {selectedKeys && selectedKeys.size > 0 && (
+            <button
+              onClick={onBatchMigrate}
+              disabled={batchMigrating}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              style={{ background: 'var(--color-primary)' }}
+            >
+              <ArrowRightLeft className="w-3.5 h-3.5" />
+              {batchMigrating && batchProgress
+                ? `迁移中 ${batchProgress.current}/${batchProgress.total}`
+                : `批量迁移 (${selectedKeys.size})`}
+            </button>
+          )}
+        </div>
+      )}
+
       {/* 应用列表 */}
       <div className="flex-1 min-h-0 overflow-y-auto px-1">
         {filteredApps.length > 0 ? (
           <div className="space-y-2 py-1">
-            {filteredApps.map((app, index) => (
-              <AppRow 
-                key={`${app.display_name}-${index}`} 
-                app={app} 
+            {filteredApps.map((app) => {
+              const key = app.registry_path || app.install_location;
+              return (
+              <AppRow
+                key={key}
+                app={app}
                 onMigrate={onMigrate}
                 onRestore={onRestore}
                 onUninstall={onUninstall}
                 onOpenFolder={handleOpenFolder}
                 isUninstalling={uninstallingKey === `${app.display_name}|${app.registry_path}`}
+                isRestoring={restoringKey === `${app.display_name}|${app.registry_path}`}
                 isMigrated={isAppMigrated(app)}
+                isSelected={selectedKeys?.has(key)}
+                onToggleSelect={onToggleSelect}
+                showCheckbox={!!onToggleSelect}
               />
-            ))}
+            )})}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-16 text-center">

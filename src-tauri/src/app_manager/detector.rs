@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
 use crate::MigrationResult;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 #[cfg(windows)]
 use winreg::enums::HKEY_CURRENT_USER;
@@ -94,16 +96,22 @@ pub fn get_special_folders_status() -> Result<Vec<SpecialFolder>, String> {
 /// 迁移特殊目录（安全工作流）
 /// 1. 进程预检（目标应用必须已退出）
 /// 2. 复用 migration::migrate_app 执行原子迁移与目录联接
-pub fn migrate_special_folder(app_name: String, source_path: String, target_dir: String) -> Result<MigrationResult, String> {
+pub fn migrate_special_folder(
+    app_name: String,
+    source_path: String,
+    target_dir: String,
+    cancel_flag: &Arc<AtomicBool>,
+    app_handle: &tauri::AppHandle,
+) -> Result<MigrationResult, String> {
     #[cfg(windows)]
     {
         ensure_app_not_running(&app_name)?;
-        crate::app_manager::migration::migrate_app(app_name, source_path, target_dir)
+        crate::app_manager::migration::migrate_app(app_name, source_path, target_dir, cancel_flag, app_handle)
     }
 
     #[cfg(not(windows))]
     {
-        let _ = (app_name, source_path, target_dir);
+        let _ = (app_name, source_path, target_dir, cancel_flag, app_handle);
         Ok(MigrationResult {
             success: false,
             message: "此功能仅支持 Windows 系统".to_string(),

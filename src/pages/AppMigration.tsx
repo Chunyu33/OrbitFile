@@ -1,19 +1,33 @@
 // 应用迁移页面
 // 实现完整的迁移流程：目录选择 -> 进程检测 -> 文件复制 -> 创建链接
+// 支持真实进度上报和取消操作
 
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { confirm, open } from '@tauri-apps/plugin-dialog';
 import AppList from '../components/AppList';
 import MigrationModal from '../components/MigrationModal';
 import CleanupModal from '../components/CleanupModal';
 import Toast, { useToast } from '../components/Toast';
-import { CleanupResult, InstalledApp, LeftoverItem, MigrationRecord, MigrationResult, MigrationStep, ProcessLockResult, UninstallResult } from '../types';
+import { logger } from '../utils/logger';
+import {
+  CleanupResult,
+  InstalledApp,
+  LeftoverItem,
+  MigrationProgressEvent,
+  MigrationRecord,
+  MigrationResult,
+  MigrationStep,
+  ProcessLockResult,
+  UninstallPreview,
+  UninstallResult,
+} from '../types';
 
 export default function AppMigration() {
   const [apps, setApps] = useState<InstalledApp[]>([]);
   const [appsLoading, setAppsLoading] = useState(true);
-  
+
   // 已迁移的路径列表
   const [migratedPaths, setMigratedPaths] = useState<string[]>([]);
   // 应用迁移记录（用于还原时获取 historyId）
@@ -24,16 +38,23 @@ export default function AppMigration() {
   const [migrationStep, setMigrationStep] = useState<MigrationStep>('idle');
   const [migratingApp, setMigratingApp] = useState<InstalledApp | null>(null);
   const [migrationMessage, setMigrationMessage] = useState('');
+  const [migrationProgress, setMigrationProgress] = useState(0);
   const [lockedProcesses, setLockedProcesses] = useState<string[]>([]);
 
   // 强力卸载状态
   const [uninstallingKey, setUninstallingKey] = useState<string | null>(null);
+  // 还原状态
+  const [restoringKey, setRestoringKey] = useState<string | null>(null);
+  // 批量迁移
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [batchMigrating, setBatchMigrating] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
   const [cleanupModalOpen, setCleanupModalOpen] = useState(false);
   const [cleanupTargetAppName, setCleanupTargetAppName] = useState('');
   const [cleanupTargetPublisher, setCleanupTargetPublisher] = useState<string | null>(null);
   const [leftoverItems, setLeftoverItems] = useState<LeftoverItem[]>([]);
   const [cleanupLoading, setCleanupLoading] = useState(false);
-  
+
   // Toast 通知
   const { toast, showToast, hideToast } = useToast();
 
@@ -75,7 +96,7 @@ export default function AppMigration() {
       const installedApps = await invoke<InstalledApp[]>('get_installed_apps');
       setApps(installedApps);
     } catch (error) {
-      console.error('获取应用列表失败:', error);
+      logger.error('获取应用列表失败:', error);
       setApps([]);
     } finally {
       setAppsLoading(false);
@@ -90,7 +111,7 @@ export default function AppMigration() {
       setAppMigrationRecords(appRecords);
       setMigratedPaths(appRecords.map(record => record.original_path));
     } catch (error) {
-      console.error('获取应用迁移记录失败:', error);
+      logger.error('获取应用迁移记录失败:', error);
       setAppMigrationRecords([]);
       setMigratedPaths([]);
     }
@@ -111,7 +132,11 @@ export default function AppMigration() {
       return;
     }
 
+    const currentRestoreKey = `${app.display_name}|${app.registry_path}`;
+
     try {
+      setRestoringKey(currentRestoreKey);
+
       const result = await invoke<MigrationResult>('restore_app', {
         historyId: record.id,
       });
@@ -124,13 +149,33 @@ export default function AppMigration() {
       }
     } catch (error) {
       showToast(`还原失败: ${error}`, 'error');
+    } finally {
+      setRestoringKey(null);
     }
   }
 
   // 强力卸载流程
   async function handleUninstall(app: InstalledApp) {
+    // 先预览卸载命令，在确认对话框中展示
+    let previewCommands: string[] = [];
+    try {
+      const preview = await invoke<UninstallPreview>('preview_uninstall', {
+        input: {
+          app_id: app.display_name,
+          registry_path: app.registry_path,
+        },
+      });
+      previewCommands = preview.commands;
+    } catch {
+      // 预览失败不阻塞流程
+    }
+
+    const commandLines = previewCommands.length > 0
+      ? `\n\n即将执行的卸载命令：\n${previewCommands.map((c, i) => `  ${i + 1}. ${c}`).join('\n')}`
+      : '';
+
     const confirmed = await confirm(
-      `即将启动 ${app.display_name} 的卸载程序。\n\n此操作可能删除应用及其相关组件，是否继续？`,
+      `即将启动 ${app.display_name} 的卸载程序。\n\n此操作可能删除应用及其相关组件，是否继续？${commandLines}`,
       {
         title: '确认强力卸载',
         kind: 'warning',
@@ -245,14 +290,13 @@ export default function AppMigration() {
 
   // 核心迁移流程
   async function handleMigrate(app: InstalledApp) {
-    // 步骤 1: 打开目录选择器，让用户选择目标文件夹
+    // 步骤 1: 打开目录选择器
     const targetDir = await open({
       directory: true,
       multiple: false,
       title: `选择迁移目标文件夹 - ${app.display_name}`,
     });
 
-    // 用户取消选择
     if (!targetDir) {
       return;
     }
@@ -262,48 +306,126 @@ export default function AppMigration() {
     setMigrationModalOpen(true);
     setMigrationStep('checking');
     setMigrationMessage('');
+    setMigrationProgress(0);
     setLockedProcesses([]);
 
+    // 步骤 2: 检查进程锁
     try {
-      // 步骤 2: 检查进程锁
       const lockResult = await invoke<ProcessLockResult>('check_process_locks', {
         sourcePath: app.install_location,
       });
 
       if (lockResult.is_locked) {
-        // 发现进程占用，显示警告但继续执行
+        // 阻塞：显示进程占用列表，等待用户处理（关闭进程后强制继续）
         setLockedProcesses(lockResult.processes);
-        // 等待 2 秒让用户看到警告
-        await new Promise(resolve => setTimeout(resolve, 2000));
+        // 不自动继续，用户需手动点击"强制继续"或关闭弹窗
+        return;
       }
 
-      // 步骤 3: 开始复制文件
-      setMigrationStep('copying');
-      setLockedProcesses([]);
+      // 无进程占用，直接开始复制
+      await startCopyPhase(app, targetDir as string);
+    } catch (error) {
+      setMigrationStep('error');
+      setMigrationMessage(`检测进程锁失败: ${error}`);
+    }
+  }
 
-      // 步骤 4: 执行迁移（包含复制、校验、创建链接）
-      setMigrationStep('linking');
-      
+  // 用户确认强制继续（忽略进程锁）
+  async function handleForceContinue() {
+    if (!migratingApp) return;
+
+    // 找到 targetDir（从上一个状态无法直接获取，需重新选择）
+    // 实际场景：关闭进程后强制继续，直接进入复制阶段
+    setLockedProcesses([]);
+
+    const targetDir = await open({
+      directory: true,
+      multiple: false,
+      title: `选择迁移目标文件夹 - ${migratingApp.display_name}`,
+    });
+
+    if (!targetDir) return;
+
+    await startCopyPhase(migratingApp, targetDir as string);
+  }
+
+  // 开始文件复制阶段（带事件监听）
+  async function startCopyPhase(app: InstalledApp, targetDir: string) {
+    setMigrationStep('counting');
+    setLockedProcesses([]);
+
+    // 注册进度事件监听器
+    let unlisten: UnlistenFn | null = null;
+    try {
+      unlisten = await listen<MigrationProgressEvent>('migration-progress', (event) => {
+        const data = event.payload;
+        setMigrationProgress(data.percent);
+
+        // 根据后端 step 同步前端步骤
+        switch (data.step) {
+          case 'counting':
+            setMigrationStep('counting');
+            break;
+          case 'copying':
+            setMigrationStep('copying');
+            break;
+          case 'verifying':
+            setMigrationStep('verifying');
+            break;
+          case 'linking':
+            setMigrationStep('linking');
+            break;
+          case 'done':
+            // 不在这里处理，等待 migrate_app 返回
+            break;
+        }
+        setMigrationMessage(data.message);
+      });
+    } catch (error) {
+      logger.error('注册进度监听失败:', error);
+    }
+
+    // 执行迁移（Rust 后端会在复制过程中推送进度事件）
+    try {
       const result = await invoke<MigrationResult>('migrate_app', {
         appName: app.display_name,
         source: app.install_location,
         targetParent: targetDir,
       });
 
-      // 步骤 5: 显示结果
+      // 取消事件监听
+      if (unlisten) unlisten();
+
       if (result.success) {
         setMigrationStep('success');
+        setMigrationProgress(100);
         setMigrationMessage(result.message);
         showToast('迁移成功！', 'success');
-        // 刷新应用列表和磁盘信息
         await handleRefresh();
       } else {
         setMigrationStep('error');
         setMigrationMessage(result.message);
       }
     } catch (error) {
+      if (unlisten) unlisten();
       setMigrationStep('error');
-      setMigrationMessage(`迁移过程中发生错误: ${error}`);
+      // 区分用户取消和真实错误
+      const errStr = String(error);
+      setMigrationMessage(
+        errStr.includes('用户取消了迁移')
+          ? '迁移已被取消'
+          : `迁移过程中发生错误: ${error}`
+      );
+    }
+  }
+
+  // 取消当前迁移
+  async function handleCancelMigration() {
+    try {
+      await invoke('cancel_migration');
+      showToast('正在取消迁移...', 'info');
+    } catch (error) {
+      logger.error('取消迁移失败:', error);
     }
   }
 
@@ -313,7 +435,107 @@ export default function AppMigration() {
     setMigratingApp(null);
     setMigrationStep('idle');
     setMigrationMessage('');
+    setMigrationProgress(0);
     setLockedProcesses([]);
+  }
+
+  // 批量选择处理
+  function handleToggleSelect(app: InstalledApp) {
+    const key = app.registry_path || app.install_location;
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
+  function handleSelectAll() {
+    const selectable = apps.filter((a) => !migratedPaths.some(
+      (p) => p.toLowerCase() === a.install_location.toLowerCase()
+    ));
+    setSelectedKeys((prev) => {
+      if (prev.size === selectable.length) {
+        return new Set();
+      }
+      return new Set(selectable.map((a) => a.registry_path || a.install_location));
+    });
+  }
+
+  // 批量迁移：依次迁移每个选中的应用
+  async function handleBatchMigrate() {
+    if (selectedKeys.size === 0) return;
+
+    const targetDir = await open({
+      directory: true,
+      multiple: false,
+      title: '选择批量迁移目标文件夹',
+    });
+    if (!targetDir) return;
+
+    const selectedApps = apps.filter((a) =>
+      selectedKeys.has(a.registry_path || a.install_location)
+    );
+    if (selectedApps.length === 0) return;
+
+    const confirmed = await confirm(
+      `即将批量迁移 ${selectedApps.length} 个应用到：\n${targetDir}\n\n每个应用将迁移到独立的子目录中，是否继续？`,
+      { title: '确认批量迁移', kind: 'warning', okLabel: '开始迁移', cancelLabel: '取消' }
+    );
+    if (!confirmed) return;
+
+    setBatchMigrating(true);
+    setBatchProgress({ current: 0, total: selectedApps.length });
+    setSelectedKeys(new Set());
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < selectedApps.length; i++) {
+      const app = selectedApps[i];
+      setBatchProgress({ current: i + 1, total: selectedApps.length });
+
+      try {
+        // 检查进程锁
+        const lockResult = await invoke<ProcessLockResult>('check_process_locks', {
+          sourcePath: app.install_location,
+        });
+        if (lockResult.is_locked) {
+          showToast(`${app.display_name}: 文件被占用，跳过`, 'error');
+          failCount++;
+          continue;
+        }
+
+        const result = await invoke<MigrationResult>('migrate_app', {
+          appName: app.display_name,
+          source: app.install_location,
+          targetParent: targetDir,
+        });
+
+        if (result.success) {
+          successCount++;
+        } else {
+          showToast(`${app.display_name}: ${result.message}`, 'error');
+          failCount++;
+        }
+      } catch (error) {
+        showToast(`${app.display_name}: ${error}`, 'error');
+        failCount++;
+      }
+    }
+
+    setBatchMigrating(false);
+    setBatchProgress({ current: 0, total: 0 });
+
+    if (failCount === 0) {
+      showToast(`批量迁移完成：${successCount} 个全部成功`, 'success');
+    } else {
+      showToast(`批量迁移完成：${successCount} 成功, ${failCount} 失败`, 'info');
+    }
+    await handleRefresh();
   }
 
   useEffect(() => {
@@ -324,17 +546,24 @@ export default function AppMigration() {
   return (
     <div className="h-full overflow-hidden flex flex-col" style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
       <div className="h-full max-w-5xl mx-auto w-full">
-        {/* 应用列表区域 - 占据全部空间 */}
+        {/* 应用列表区域 */}
         <section className="h-full min-h-0 flex flex-col overflow-hidden">
-          <AppList 
-            apps={apps} 
-            loading={appsLoading} 
+          <AppList
+            apps={apps}
+            loading={appsLoading}
             onMigrate={handleMigrate}
             onRestore={handleRestore}
             onUninstall={handleUninstall}
             onOpenFolder={handleOpenFolder}
             uninstallingKey={uninstallingKey}
+            restoringKey={restoringKey}
             migratedPaths={migratedPaths}
+            selectedKeys={selectedKeys}
+            onToggleSelect={handleToggleSelect}
+            onSelectAll={handleSelectAll}
+            onBatchMigrate={handleBatchMigrate}
+            batchMigrating={batchMigrating}
+            batchProgress={batchProgress}
           />
         </section>
       </div>
@@ -346,6 +575,9 @@ export default function AppMigration() {
         appName={migratingApp?.display_name || ''}
         message={migrationMessage}
         lockedProcesses={lockedProcesses}
+        progress={migrationProgress}
+        onCancel={handleCancelMigration}
+        onForceContinue={handleForceContinue}
         onClose={handleCloseMigrationModal}
       />
 

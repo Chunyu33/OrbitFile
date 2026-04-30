@@ -10,7 +10,8 @@ use std::fs;
 use std::io::{Read, Write, Cursor};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // Base64 编码，用于图标数据传输
 use base64::Engine;
@@ -42,6 +43,21 @@ use fs_extra::dir::{copy, move_dir, CopyOptions, get_size};
 // 键为图标路径，值为 Base64 编码的图标数据
 lazy_static::lazy_static! {
     static ref ICON_CACHE: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
+}
+
+/// 迁移任务状态（Tauri 托管状态）
+/// 用于在前后端之间传递取消信号
+pub struct MigrationState {
+    /// 取消标志：前端调用 cancel_migration 时设置为 true
+    pub cancel_flag: Arc<AtomicBool>,
+}
+
+impl Default for MigrationState {
+    fn default() -> Self {
+        Self {
+            cancel_flag: Arc::new(AtomicBool::new(false)),
+        }
+    }
 }
 
 /// 已安装应用信息结构体
@@ -151,8 +167,21 @@ fn get_special_folders_status() -> Result<Vec<app_manager::detector::SpecialFold
 
 /// 迁移特殊应用目录（含进程预检）
 #[tauri::command]
-fn migrate_special_folder(app_name: String, source_path: String, target_dir: String) -> Result<MigrationResult, String> {
-    app_manager::detector::migrate_special_folder(app_name, source_path, target_dir)
+fn migrate_special_folder(
+    app_name: String,
+    source_path: String,
+    target_dir: String,
+    state: tauri::State<'_, MigrationState>,
+    app_handle: tauri::AppHandle,
+) -> Result<MigrationResult, String> {
+    state.cancel_flag.store(false, Ordering::SeqCst);
+    app_manager::detector::migrate_special_folder(
+        app_name,
+        source_path,
+        target_dir,
+        &state.cancel_flag,
+        &app_handle,
+    )
 }
 
 /// 解析图标路径，分离文件路径和图标索引
@@ -1031,30 +1060,57 @@ fn check_process_locks(source_path: String) -> Result<ProcessLockResult, String>
 }
 
 /// 将应用从源路径迁移到目标路径，并创建 Windows 目录联接（Junction）
-/// 
+///
 /// # 迁移流程详解
-/// 
+///
 /// 1. **空间检查**: 计算源文件夹大小，确认目标磁盘有足够空间
-/// 2. **创建临时目录**: 在目标路径下创建临时文件夹存放复制的文件
-/// 3. **递归复制**: 使用 fs_extra 将所有文件从源路径复制到目标
+/// 2. **进度上报**: 通过 `migration-progress` 事件实时推送复制进度
+/// 3. **逐个复制**: 遍历源目录文件列表，逐个复制并上报百分比
 /// 4. **完整性校验**: 比较源和目标文件夹的总大小是否一致
 /// 5. **备份原目录**: 将原始源目录重命名为 xxx_backup
 /// 6. **创建 Junction**: 在原路径创建指向新位置的目录联接
-///    - Junction 是 Windows 特有的目录链接，对应用程序透明
-///    - 应用仍然认为文件在原位置，但实际存储在新磁盘
 /// 7. **清理备份**: 迁移成功后删除备份目录
 /// 8. **回滚机制**: 任何步骤失败都会尝试恢复原状态
-/// 
+/// 9. **取消支持**: 前端可随时调用 cancel_migration 中断迁移
+///
 /// # 参数
 /// - `app_name`: 应用名称（用于记录历史）
 /// - `source`: 源路径（应用原安装位置）
 /// - `target_parent`: 目标父目录（用户选择的目标文件夹）
-/// 
-/// # 返回
-/// - `MigrationResult`: 迁移结果，包含成功状态和新路径
 #[tauri::command]
-fn migrate_app(app_name: String, source: String, target_parent: String) -> Result<MigrationResult, String> {
-    app_manager::migration::migrate_app(app_name, source, target_parent)
+fn migrate_app(
+    app_name: String,
+    source: String,
+    target_parent: String,
+    state: tauri::State<'_, MigrationState>,
+    app_handle: tauri::AppHandle,
+) -> Result<MigrationResult, String> {
+    // 每次迁移开始前重置取消标志
+    state.cancel_flag.store(false, Ordering::SeqCst);
+
+    app_manager::migration::migrate_app(
+        app_name,
+        source,
+        target_parent,
+        &state.cancel_flag,
+        &app_handle,
+    )
+}
+
+/// 取消正在进行的迁移任务
+///
+/// 设置取消标志后，迁移流程会在下一个检查点停止并回滚
+#[tauri::command]
+fn cancel_migration(state: tauri::State<'_, MigrationState>) -> Result<(), String> {
+    state.cancel_flag.store(true, Ordering::SeqCst);
+    Ok(())
+}
+
+/// 预览卸载命令（不执行）
+/// 供前端在确认对话框中展示即将运行的卸载命令
+#[tauri::command]
+fn preview_uninstall(input: app_manager::uninstaller::UninstallInput) -> Result<app_manager::uninstaller::UninstallPreview, String> {
+    app_manager::uninstaller::preview_uninstall(input)
 }
 
 /// 启动应用卸载流程
@@ -1666,12 +1722,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        // 注册托管状态
+        .manage(MigrationState::default())
         // 注册前端可调用的命令
         .invoke_handler(tauri::generate_handler![
-            get_installed_apps, 
+            get_installed_apps,
             get_disk_usage,
             check_process_locks,
             migrate_app,
+            cancel_migration,
+            preview_uninstall,
             uninstall_application,
             scan_app_residue,
             execute_cleanup,

@@ -343,6 +343,28 @@ pub struct CleanupResult {
     pub failed_items: Vec<String>,
 }
 
+/// 卸载命令预览结果
+#[derive(Debug, Serialize, Deserialize)]
+pub struct UninstallPreview {
+    pub commands: Vec<String>,
+}
+
+/// 预览卸载命令（不执行）
+/// 供前端在确认对话框中展示即将运行的卸载命令
+pub fn preview_uninstall(input: UninstallInput) -> Result<UninstallPreview, String> {
+    #[cfg(windows)]
+    {
+        let commands = resolve_uninstall_commands(&input)?;
+        Ok(UninstallPreview { commands })
+    }
+
+    #[cfg(not(windows))]
+    {
+        let _ = input;
+        Ok(UninstallPreview { commands: vec!["仅支持 Windows".to_string()] })
+    }
+}
+
 /// 强力卸载入口
 /// 1) 解析并执行卸载命令（等待卸载进程退出）
 /// 2) 返回成功后由前端手动确认是否触发残留扫描
