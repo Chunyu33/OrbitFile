@@ -4,16 +4,18 @@
 
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-dialog';
+import { open, confirm } from '@tauri-apps/plugin-dialog';
 import { getVersion } from '@tauri-apps/api/app';
 import AppIconSvg from '../assets/icon.svg';
-import { 
-  FolderCog, Shield, CheckCircle, ChevronRight, User, Mail, Info, 
-  AlertTriangle, Lightbulb, FolderArchive, Trash2, 
-  AppWindow, Loader2, Sparkles, Sun, Moon, Monitor
+import {
+  FolderCog, Shield, CheckCircle, ChevronRight, User, Mail, Info,
+  AlertTriangle, Lightbulb, FolderArchive, Trash2,
+  AppWindow, Loader2, Sparkles, Sun, Moon, Monitor, Database
 } from 'lucide-react';
 import { useThemeContext } from '../App';
 import type { ThemeMode } from '../hooks/useTheme';
+import Toast, { useToast } from '../components/Toast';
+import type { DataDirConfig } from '../types';
 
 // 迁移统计信息接口
 interface MigrationStats {
@@ -138,16 +140,21 @@ export default function Settings() {
   const [cleaning, setCleaning] = useState(false);
   const [cleanResult, setCleanResult] = useState<CleanupResult | null>(null);
   const [appVersion, setAppVersion] = useState('...');
+  // 数据目录状态
+  const [dataDir, setDataDir] = useState('');
+  const [dataDirLoading, setDataDirLoading] = useState(false);
   const currentYear = new Date().getFullYear();
-  
+
+  const { toast, showToast, hideToast } = useToast();
+
   // 获取主题状态
   const themeState = useThemeContext();
 
-  // 加载设置、统计信息和版本号
+  // 加载设置、统计信息、版本号和数据目录
   useEffect(() => {
     setSettings(loadSettings());
     loadStats();
-    // 动态获取版本号
+    loadDataDir();
     getVersion().then(setAppVersion).catch(() => setAppVersion('1.0.0'));
   }, []);
 
@@ -158,6 +165,50 @@ export default function Settings() {
       setStats(result);
     } catch (e) {
       console.error('加载统计信息失败:', e);
+    }
+  }
+
+  // 加载当前数据目录
+  async function loadDataDir() {
+    try {
+      const info = await invoke<DataDirConfig>('get_data_dir_info');
+      setDataDir(info.data_dir);
+    } catch (e) {
+      console.error('加载数据目录失败:', e);
+    }
+  }
+
+  // 修改数据目录
+  async function handleChangeDataDir() {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: '选择新的数据存储目录',
+    });
+    if (!selected || typeof selected !== 'string') return;
+
+    // 确认迁移
+    const confirmed = await confirm(
+      `数据目录将从:\n${dataDir}\n\n迁移到:\n${selected}\n\n所有迁移历史、自定义文件夹等数据将自动复制到新位置。\n原位置的文件将保留作为备份。\n\n是否继续？`,
+      {
+        title: '确认迁移数据目录',
+        kind: 'warning',
+        okLabel: '确认迁移',
+        cancelLabel: '取消',
+      }
+    );
+    if (!confirmed) return;
+
+    setDataDirLoading(true);
+    try {
+      await invoke('set_data_dir', { newPath: selected });
+      setDataDir(selected);
+      showToast('数据目录已成功迁移', 'success');
+    } catch (e) {
+      console.error('迁移数据目录失败:', e);
+      showToast(`迁移失败: ${e}`, 'error');
+    } finally {
+      setDataDirLoading(false);
     }
   }
 
@@ -419,6 +470,68 @@ export default function Settings() {
               </div>
             </div>
             <Toggle active={settings.verifyEnabled} onChange={() => updateSetting('verifyEnabled', !settings.verifyEnabled)} />
+          </div>
+        </section>
+
+        {/* 数据存储目录 */}
+        <section className="rounded-lg border border-[var(--border-color)] bg-[var(--bg-card)] overflow-hidden">
+          <div
+            style={{
+              padding: 'var(--spacing-3) var(--spacing-5)',
+              background: 'var(--color-gray-50)',
+              borderBottom: '1px solid var(--border-color)',
+              fontSize: 'var(--font-size-xs)',
+              fontWeight: 'var(--font-weight-medium)',
+              color: 'var(--text-tertiary)',
+              textTransform: 'uppercase',
+              letterSpacing: '0.5px'
+            }}
+          >
+            数据管理
+          </div>
+
+          {/* 数据目录位置 */}
+          <div className="setting-item" style={{ padding: 'var(--spacing-4) var(--spacing-5)', margin: 0 }}>
+            <div className="flex items-center" style={{ gap: 'var(--spacing-3)' }}>
+              <div
+                className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--color-primary-light)' }}
+              >
+                <Database className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="setting-label">数据存储目录</p>
+                <p className="setting-desc" title={dataDir}>
+                  迁移历史、自定义文件夹、模板配置等数据的存放位置
+                </p>
+                {dataDir && (
+                  <p
+                    className="text-[11px] mt-1 truncate"
+                    style={{ color: 'var(--text-muted)', fontFamily: 'monospace' }}
+                    title={dataDir}
+                  >
+                    {dataDir}
+                  </p>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={handleChangeDataDir}
+              disabled={dataDirLoading}
+              className="h-8 px-3 text-[12px] font-medium rounded-md border border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors inline-flex items-center gap-1.5 disabled:opacity-50 flex-shrink-0"
+            >
+              {dataDirLoading ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  迁移中
+                </>
+              ) : (
+                <>
+                  <FolderCog className="w-3.5 h-3.5" />
+                  更改
+                </>
+              )}
+            </button>
           </div>
         </section>
 
@@ -745,9 +858,9 @@ export default function Settings() {
         </section>
 
         {/* 版权声明 */}
-        <div 
-          className="flex items-center justify-center" 
-          style={{ 
+        <div
+          className="flex items-center justify-center"
+          style={{
             padding: 'var(--spacing-4)',
             color: 'var(--text-muted)',
             fontSize: 'var(--font-size-xs)'
@@ -756,6 +869,14 @@ export default function Settings() {
           <span>© {currentYear} {APP_INFO.name}. All rights reserved.</span>
         </div>
       </div>
+
+      {/* Toast 通知 */}
+      <Toast
+        message={toast.message}
+        type={toast.type}
+        visible={toast.visible}
+        onClose={hideToast}
+      />
     </div>
   );
 }

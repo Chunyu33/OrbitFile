@@ -431,6 +431,136 @@ struct LargeFolderRestoreCompleteEvent {
     new_path: Option<String>,
 }
 
+// ============================================================================
+// 数据目录管理
+// ============================================================================
+//
+// 架构说明：
+// - 指针文件 %APPDATA%/orbit-file.json 记录实际数据目录路径（仅几十字节）
+// - 默认数据目录 %APPDATA%/orbit-file/（与旧版兼容）
+// - 用户可在设置中修改数据目录，所有数据文件自动迁移
+// - 启动时检测数据目录是否存在，缺失则自动重建空文件
+// ============================================================================
+
+/// 数据目录配置（存储在指针文件中）
+#[derive(Debug, Serialize, Deserialize)]
+struct DataDirConfig {
+    data_dir: String,
+}
+
+/// 获取指针文件路径
+/// 指针文件始终位于 %APPDATA%/orbit-file.json，体积极小
+fn get_data_dir_config_path() -> PathBuf {
+    let config_dir = dirs::config_dir()
+        .unwrap_or_else(|| PathBuf::from("."));
+    config_dir.join("orbit-file.json")
+}
+
+/// 获取实际数据目录路径
+/// 读取指针文件 → 返回配置路径，或使用默认 %APPDATA%/orbit-file/
+fn get_data_dir() -> PathBuf {
+    let config_path = get_data_dir_config_path();
+    if config_path.exists() {
+        if let Ok(contents) = std::fs::read_to_string(&config_path) {
+            if let Ok(config) = serde_json::from_str::<DataDirConfig>(&contents) {
+                let path = PathBuf::from(&config.data_dir);
+                if !path.to_string_lossy().is_empty() {
+                    return path;
+                }
+            }
+        }
+    }
+    // 默认路径（与旧版兼容）
+    let appdata = std::env::var("APPDATA")
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(appdata).join("orbit-file")
+}
+
+/// 确保数据目录存在，缺失则自动重建（防止程序崩溃）
+fn ensure_data_dir() -> PathBuf {
+    let dir = get_data_dir();
+    if !dir.exists() {
+        // 启动恢复：目录被删除或迁移中断，自动重建空目录
+        let _ = std::fs::create_dir_all(&dir);
+    }
+    dir
+}
+
+/// 获取当前数据目录信息（供前端设置页使用）
+#[tauri::command]
+fn get_data_dir_info() -> Result<DataDirConfig, String> {
+    let dir = get_data_dir();
+    Ok(DataDirConfig {
+        data_dir: dir.to_string_lossy().to_string(),
+    })
+}
+
+/// 迁移数据文件从旧目录到新目录
+fn migrate_data_files(old_dir: &Path, new_dir: &Path) -> Result<(), String> {
+    // 确保新目录存在
+    std::fs::create_dir_all(new_dir)
+        .map_err(|e| format!("无法创建数据目录: {}", e))?;
+
+    // 需要迁移的数据文件列表
+    let data_files = [
+        "migration_history.json",
+        "migration_history.json.bak",
+        "custom_folders.json",
+    ];
+
+    for filename in &data_files {
+        let old_path = old_dir.join(filename);
+        let new_path = new_dir.join(filename);
+        if old_path.exists() {
+            // 逐个复制文件，大文件不会阻塞（单个 JSON 文件通常 < 10MB）
+            std::fs::copy(&old_path, &new_path)
+                .map_err(|e| format!("迁移文件失败 {}: {}", filename, e))?;
+        }
+    }
+
+    Ok(())
+}
+
+/// 修改数据目录（Tauri 命令）
+/// 将数据文件从旧目录迁移到新目录，更新指针文件
+#[tauri::command]
+fn set_data_dir(new_path: String) -> Result<String, String> {
+    let old_dir = get_data_dir();
+    let new_dir = PathBuf::from(&new_path);
+
+    // 相同路径，无需迁移
+    if old_dir == new_dir {
+        return Ok(new_path);
+    }
+
+    // 校验新路径合法性
+    if new_path.trim().is_empty() {
+        return Err("数据目录路径不能为空".to_string());
+    }
+
+    // 创建新目录
+    std::fs::create_dir_all(&new_dir)
+        .map_err(|e| format!("无法创建数据目录: {}", e))?;
+
+    // 迁移数据文件（仅在旧目录存在时）
+    if old_dir.exists() {
+        migrate_data_files(&old_dir, &new_dir)?;
+    }
+
+    // 原子写入指针文件：先写临时文件，再重命名（防止写入过程中断电损坏配置）
+    let config = DataDirConfig { data_dir: new_path.clone() };
+    let json = serde_json::to_string_pretty(&config)
+        .map_err(|e| format!("序列化配置失败: {}", e))?;
+    let config_path = get_data_dir_config_path();
+    let temp_config = config_path.with_extension("json.tmp");
+    std::fs::write(&temp_config, &json)
+        .map_err(|e| format!("写入配置文件失败: {}", e))?;
+    std::fs::rename(&temp_config, &config_path)
+        .map_err(|e| format!("配置文件重命名失败: {}", e))?;
+
+    Ok(new_path)
+}
+
 /// 自定义文件夹持久化条目
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CustomFolderEntry {
@@ -439,19 +569,16 @@ struct CustomFolderEntry {
     display_name: String,
 }
 
-/// 自定义文件夹持久化文件路径 (%APPDATA%/orbit-file/custom_folders.json)
-fn custom_folders_path() -> Option<PathBuf> {
-    let appdata = std::env::var("APPDATA").ok()?;
-    let dir = PathBuf::from(&appdata).join("orbit-file");
-    Some(dir.join("custom_folders.json"))
+/// 自定义文件夹持久化文件路径
+/// 数据目录可在设置中自定义，默认 %APPDATA%/orbit-file/
+fn custom_folders_path() -> PathBuf {
+    let dir = ensure_data_dir();
+    dir.join("custom_folders.json")
 }
 
 /// 读取自定义文件夹列表
 fn load_custom_folders() -> Vec<CustomFolderEntry> {
-    let path = match custom_folders_path() {
-        Some(p) => p,
-        None => return Vec::new(),
-    };
+    let path = custom_folders_path();
     if !path.exists() {
         return Vec::new();
     }
@@ -463,7 +590,7 @@ fn load_custom_folders() -> Vec<CustomFolderEntry> {
 
 /// 保存自定义文件夹列表
 fn save_custom_folders(folders: &[CustomFolderEntry]) -> Result<(), String> {
-    let path = custom_folders_path().ok_or("无法获取 APPDATA 路径")?;
+    let path = custom_folders_path();
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建配置目录失败: {}", e))?;
     }
@@ -472,8 +599,174 @@ fn save_custom_folders(folders: &[CustomFolderEntry]) -> Result<(), String> {
     Ok(())
 }
 
+// ============================================================================
+// 应用数据模板管理
+// ============================================================================
+//
+// 模板定义哪些应用的数据目录需要监控，存储在 app_data_templates.json
+// 用户可通过编辑此文件增删监控的应用类别，无需修改 Rust 代码
+// ============================================================================
+
+/// 应用数据模板条目
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AppDataTemplate {
+    /// 唯一标识（内置类型对应 detector 模块，如 "wechat", "qq"）
+    id: String,
+    /// 显示名称
+    display_name: String,
+    /// 图标标识（前端 iconMap 的 key）
+    #[serde(default = "default_icon_id")]
+    icon_id: String,
+    /// 关联进程名（用于迁移前进程检测）
+    #[serde(default = "default_process_names")]
+    process_names: Vec<String>,
+    /// 可选的固定路径（支持 %VAR% 环境变量展开）
+    /// 如果提供，直接使用此路径；否则委托 detector 模块动态检测
+    #[serde(default)]
+    path: Option<String>,
+}
+
+fn default_icon_id() -> String { "folder".to_string() }
+fn default_process_names() -> Vec<String> { vec![] }
+
+/// 获取应用数据模板文件路径
+fn app_data_templates_path() -> PathBuf {
+    let dir = ensure_data_dir();
+    dir.join("app_data_templates.json")
+}
+
+/// 默认内置模板列表（与旧版硬编码一致，确保向后兼容）
+fn default_app_data_templates() -> Vec<AppDataTemplate> {
+    vec![
+        AppDataTemplate {
+            id: "wechat".to_string(),
+            display_name: "微信".to_string(),
+            icon_id: "wechat".to_string(),
+            process_names: vec!["WeChat.exe".to_string()],
+            path: None,
+        },
+        AppDataTemplate {
+            id: "wxwork".to_string(),
+            display_name: "企业微信".to_string(),
+            icon_id: "wxwork".to_string(),
+            process_names: vec!["WXWork.exe".to_string()],
+            path: None,
+        },
+        AppDataTemplate {
+            id: "qq".to_string(),
+            display_name: "QQ".to_string(),
+            icon_id: "qq".to_string(),
+            process_names: vec!["QQ.exe".to_string()],
+            path: None,
+        },
+        AppDataTemplate {
+            id: "dingtalk".to_string(),
+            display_name: "钉钉".to_string(),
+            icon_id: "dingtalk".to_string(),
+            process_names: vec!["DingTalk.exe".to_string()],
+            path: None,
+        },
+        AppDataTemplate {
+            id: "feishu".to_string(),
+            display_name: "飞书".to_string(),
+            icon_id: "feishu".to_string(),
+            process_names: vec!["Lark.exe".to_string(), "Feishu.exe".to_string()],
+            path: None,
+        },
+        AppDataTemplate {
+            id: "chrome_cache".to_string(),
+            display_name: "Chrome 缓存".to_string(),
+            icon_id: "chrome_cache".to_string(),
+            process_names: vec!["chrome.exe".to_string()],
+            path: None,
+        },
+        AppDataTemplate {
+            id: "edge_cache".to_string(),
+            display_name: "Edge 缓存".to_string(),
+            icon_id: "edge_cache".to_string(),
+            process_names: vec!["msedge.exe".to_string()],
+            path: None,
+        },
+        AppDataTemplate {
+            id: "vscode_extensions".to_string(),
+            display_name: "VS Code 扩展".to_string(),
+            icon_id: "vscode_extensions".to_string(),
+            process_names: vec!["code.exe".to_string()],
+            path: None,
+        },
+        AppDataTemplate {
+            id: "npm_global".to_string(),
+            display_name: "npm 全局包".to_string(),
+            icon_id: "npm_global".to_string(),
+            process_names: vec![],
+            path: None,
+        },
+    ]
+}
+
+/// 加载应用数据模板
+/// 如果模板文件不存在，自动创建默认模板（向后兼容）
+fn load_app_data_templates() -> Vec<AppDataTemplate> {
+    let path = app_data_templates_path();
+    if !path.exists() {
+        let defaults = default_app_data_templates();
+        let json = serde_json::to_string_pretty(&defaults).unwrap_or_default();
+        let _ = std::fs::write(&path, &json);
+        return defaults;
+    }
+    std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str::<Vec<AppDataTemplate>>(&s).ok())
+        .unwrap_or_else(default_app_data_templates)
+}
+
+/// 展开路径中的环境变量（如 %APPDATA%/subdir → C:/Users/.../AppData/Roaming/subdir）
+fn expand_env_vars(path_str: &str) -> String {
+    let mut result = String::with_capacity(path_str.len());
+    let mut remaining = path_str;
+    while let Some(start) = remaining.find('%') {
+        result.push_str(&remaining[..start]);
+        remaining = &remaining[start + 1..];
+        if let Some(end) = remaining.find('%') {
+            let var_name = &remaining[..end];
+            let expanded = std::env::var(var_name).unwrap_or_else(|_| {
+                // 变量不存在时保留原文
+                format!("%{}%", var_name)
+            });
+            result.push_str(&expanded);
+            remaining = &remaining[end + 1..];
+        } else {
+            // 孤立的 %，放回去
+            result.push('%');
+            result.push_str(remaining);
+            remaining = "";
+            break;
+        }
+    }
+    result.push_str(remaining);
+    result
+}
+
+/// 保存应用数据模板（Tauri 命令）
+/// 用户可通过设置页编辑模板列表
+#[tauri::command]
+fn save_app_data_templates(templates: Vec<AppDataTemplate>) -> Result<(), String> {
+    let path = app_data_templates_path();
+    let json = serde_json::to_string_pretty(&templates)
+        .map_err(|e| format!("序列化模板失败: {}", e))?;
+    std::fs::write(&path, &json)
+        .map_err(|e| format!("写入模板文件失败: {}", e))?;
+    Ok(())
+}
+
+/// 获取应用数据模板（Tauri 命令，供设置页展示和编辑）
+#[tauri::command]
+fn get_app_data_templates() -> Result<Vec<AppDataTemplate>, String> {
+    Ok(load_app_data_templates())
+}
+
 /// 检测路径是否为 Junction（目录联接）
-/// 
+///
 /// # 技术说明
 /// Windows Junction 是一种特殊的重解析点（Reparse Point）
 /// 通过检查文件属性中的 FILE_ATTRIBUTE_REPARSE_POINT 标志来判断
@@ -663,46 +956,60 @@ fn get_large_folders(app_handle: tauri::AppHandle) -> Result<Vec<LargeFolder>, S
     }
     
     // ========== 应用数据文件夹 ==========
-    // 通过 detector 模块动态检测路径（优先注册表/配置文件），不存在时回退到默认路径
-    // 新增文件夹模板只需在 detector.rs 中添加即可
-    let app_data_templates: Vec<(&str, &str, &str, Vec<&str>)> = vec![
-        ("wechat", "微信", "wechat", vec!["WeChat.exe"]),
-        ("wxwork", "企业微信", "wxwork", vec!["WXWork.exe"]),
-        ("qq", "QQ", "qq", vec!["QQ.exe"]),
-        ("dingtalk", "钉钉", "dingtalk", vec!["DingTalk.exe"]),
-        ("feishu", "飞书", "feishu", vec!["Lark.exe", "Feishu.exe"]),
-        ("chrome_cache", "Chrome 缓存", "chrome_cache", vec!["chrome.exe"]),
-        ("edge_cache", "Edge 缓存", "edge_cache", vec!["msedge.exe"]),
-        ("vscode_extensions", "VS Code 扩展", "vscode_extensions", vec!["code.exe"]),
-        ("npm_global", "npm 全局包", "npm_global", vec![]),
-    ];
+    // 从 app_data_templates.json 加载模板（用户可自行增删）
+    // 内置类型通过 detector 模块动态检测路径，path 类型直接使用指定路径
+    let app_data_templates = load_app_data_templates();
 
-    // 通过 detector 获取各应用的动态检测路径
-    let special_statuses = app_manager::detector::get_special_folders_status()?;
-    for status in special_statuses {
-        let template = app_data_templates.iter().find(|t| t.0 == status.name);
-        let (display_name, icon_id, process_names) = match template {
-            Some(t) => (t.1, t.2, t.3.iter().map(|s| s.to_string()).collect()),
-            None => continue,
-        };
+    // 分离内置模板（委托 detector）和路径模板（直接使用）
+    let builtin_ids: Vec<String> = app_data_templates.iter()
+        .filter(|t| t.path.is_none())
+        .map(|t| t.id.clone())
+        .collect();
 
-        let path = PathBuf::from(&status.current_path);
-        let exists = status.is_detected;
-        let is_junc = if exists { is_junction(&path) } else { false };
+    // 获取 detector 检测结果（仅对内置模板）
+    let all_statuses = app_manager::detector::get_special_folders_status()?;
 
-        // 大小在后台异步计算，初始化时为 0 避免阻塞
-        folders.push(LargeFolder {
-            id: status.name,
-            display_name: display_name.to_string(),
-            path: status.current_path,
-            size: 0,
-            folder_type: LargeFolderType::AppData,
-            is_junction: is_junc,
-            junction_target: if is_junc { get_junction_target(&path) } else { None },
-            app_process_names: process_names,
-            icon_id: icon_id.to_string(),
-            exists,
-        });
+    for template in &app_data_templates {
+        if let Some(custom_path) = &template.path {
+            // 路径模板：展开环境变量后直接使用
+            let expanded = expand_env_vars(custom_path);
+            let path = PathBuf::from(&expanded);
+            let exists = path.exists() && path.is_dir();
+            let is_junc = if exists { is_junction(&path) } else { false };
+            folders.push(LargeFolder {
+                id: template.id.clone(),
+                display_name: template.display_name.clone(),
+                path: expanded,
+                size: 0,
+                folder_type: LargeFolderType::AppData,
+                is_junction: is_junc,
+                junction_target: if is_junc { get_junction_target(&path) } else { None },
+                app_process_names: template.process_names.clone(),
+                icon_id: template.icon_id.clone(),
+                exists,
+            });
+        } else if builtin_ids.contains(&template.id) {
+            // 内置模板：从 detector 结果中匹配
+            let status = match all_statuses.iter().find(|s| s.name == template.id) {
+                Some(s) => s,
+                None => continue,
+            };
+            let path = PathBuf::from(&status.current_path);
+            let exists = status.is_detected;
+            let is_junc = if exists { is_junction(&path) } else { false };
+            folders.push(LargeFolder {
+                id: status.name.clone(),
+                display_name: template.display_name.clone(),
+                path: status.current_path.clone(),
+                size: 0,
+                folder_type: LargeFolderType::AppData,
+                is_junction: is_junc,
+                junction_target: if is_junc { get_junction_target(&path) } else { None },
+                app_process_names: template.process_names.clone(),
+                icon_id: template.icon_id.clone(),
+                exists,
+            });
+        }
     }
 
     // ========== 自定义文件夹 ==========
@@ -1235,19 +1542,9 @@ struct HistoryStorage {
 }
 
 /// 获取历史记录文件路径
-/// 返回 %APPDATA%/orbit-file/migration_history.json
+/// 数据目录可在设置中自定义，默认 %APPDATA%/orbit-file/
 fn get_history_file_path() -> PathBuf {
-    // 获取 AppData 目录
-    let app_data = std::env::var("APPDATA")
-        .unwrap_or_else(|_| ".".to_string());
-    
-    let dir = PathBuf::from(app_data).join("orbit-file");
-    
-    // 确保目录存在
-    if !dir.exists() {
-        let _ = fs::create_dir_all(&dir);
-    }
-    
+    let dir = ensure_data_dir();
     dir.join("migration_history.json")
 }
 
@@ -1757,6 +2054,10 @@ pub fn run() {
         .manage(MigrationState::default())
         // 注册前端可调用的命令
         .invoke_handler(tauri::generate_handler![
+            get_data_dir_info,
+            set_data_dir,
+            get_app_data_templates,
+            save_app_data_templates,
             get_installed_apps,
             get_disk_usage,
             check_process_locks,

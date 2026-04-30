@@ -163,6 +163,26 @@ export interface LargeFolderRestoreCompleteEvent {
 }
 
 /**
+ * 数据目录配置
+ * 对应 Rust 后端的 DataDirConfig 结构体
+ */
+export interface DataDirConfig {
+  data_dir: string;
+}
+
+/**
+ * 应用数据模板条目
+ * 对应 Rust 后端的 AppDataTemplate 结构体
+ */
+export interface AppDataTemplate {
+  id: string;
+  display_name: string;
+  icon_id: string;
+  process_names: string[];
+  path: string | null;
+}
+
+/**
  * 迁移结果接口
  * 对应 Rust 后端的 MigrationResult 结构体
  */
