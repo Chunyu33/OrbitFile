@@ -16,6 +16,8 @@ use std::time::Instant;
 
 use crate::{InstalledApp, ProcessLockResult};
 use sysinfo::System;
+#[cfg(windows)]
+use walkdir::WalkDir;
 
 /// 注册表扫描结果缓存 TTL（秒）
 const REGISTRY_CACHE_TTL_SECS: u64 = 30;
@@ -153,8 +155,16 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
                         .file_stem()
                         .map(|s| s.to_string_lossy().to_lowercase())
                         .unwrap_or_default();
-                    // 优先命中与目录同名的 exe，作为主程序
-                    if stem == dir_name_lower || dir_name_lower.contains(&stem) {
+                    // 名称与目录匹配：仍需检查是否为安装包/卸载器
+                    // 否则下载目录里的 "阿里云盘/阿里云盘.exe" 会被当作已安装应用
+                    let name_matches = stem == dir_name_lower || dir_name_lower.contains(&stem);
+                    if name_matches && is_installer_like_exe(&file_name_lower) {
+                        if installer_exe.is_none() {
+                            installer_exe = Some(path);
+                        }
+                        continue;
+                    }
+                    if name_matches {
                         return Some(path);
                     }
                     // 识别安装包、卸载器、版本化安装文件
@@ -202,7 +212,13 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// 路径是否属于应当跳过的系统/空目录
+lazy_static::lazy_static! {
+    /// 缓存的下载目录路径（通过 SHGetKnownFolderPath 获取，支持用户重新映射）
+    static ref DOWNLOADS_DIR_LOWER: Option<String> =
+        dirs::download_dir().map(|p| p.to_string_lossy().to_lowercase());
+}
+
+/// 路径是否属于应当跳过的系统/空/下载目录
 #[cfg(windows)]
 fn is_blacklisted_path(path: &Path) -> bool {
     let lower = path.to_string_lossy().to_lowercase();
@@ -220,6 +236,18 @@ fn is_blacklisted_path(path: &Path) -> bool {
         let nl = name.to_lowercase();
         if BLACKLIST.iter().any(|b| &nl == b) {
             return true;
+        }
+    }
+    // 跳过下载目录（含用户自定义映射后的路径），避免安装包被误识别为应用
+    if let Some(ref downloads_lower) = *DOWNLOADS_DIR_LOWER {
+        if lower == *downloads_lower {
+            return true;
+        }
+        // 仅当路径是下载目录的子路径时才拒绝（要求路径分隔符紧随其后）
+        if let Some(rest) = lower.strip_prefix(downloads_lower.as_str()) {
+            if rest.starts_with('\\') {
+                return true;
+            }
         }
     }
     // Windows.old 等衍生命名
@@ -484,7 +512,7 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
         // 按应用名称排序
         apps.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
 
-        // 提取图标（并行：避免阻塞主线程，带独立路径缓存）
+        // 提取图标 + 计算目录大小（并行：避免阻塞主线程）
         if !apps.is_empty() {
             let num_threads = std::thread::available_parallelism()
                 .map(|n| n.get())
@@ -497,6 +525,14 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
                             if !app.display_icon.is_empty() {
                                 app.icon_base64 =
                                     crate::extract_icon_to_base64(&app.display_icon);
+                            }
+                            // 注册表 EstimatedSize 大多为空（显示"未知"），
+                            // 在此并行计算安装目录的实际体积
+                            if app.estimated_size == 0 && !app.install_location.is_empty() {
+                                let dir = Path::new(&app.install_location);
+                                if dir.exists() {
+                                    app.estimated_size = compute_dir_size_kb(dir);
+                                }
                             }
                         }
                     });
@@ -516,6 +552,19 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
     {
         Ok(Vec::new())
     }
+}
+
+/// 计算目录下所有文件的总大小，返回 KB
+#[cfg(windows)]
+fn compute_dir_size_kb(dir: &Path) -> u64 {
+    WalkDir::new(dir)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|entry| entry.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum::<u64>()
+        / 1024
 }
 
 /// 检测指定路径是否被进程占用

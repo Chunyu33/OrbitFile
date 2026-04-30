@@ -1008,7 +1008,8 @@ fn build_uninstaller_fallback_args(program: &str, args: &[String]) -> Vec<Vec<St
         .map(|v| v.to_string_lossy().to_lowercase())
         .unwrap_or_default();
 
-    if !(file_name.contains("uninst") || file_name.contains("uninstall")) {
+    // 识别常见卸载器命名：uninst.exe / uninstall.exe / unins000.exe (Inno Setup) 等
+    if !(file_name.contains("unins") || file_name.contains("uninstall") || file_name.contains("卸载")) {
         return Vec::new();
     }
 
