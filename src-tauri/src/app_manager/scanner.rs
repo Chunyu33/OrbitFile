@@ -5,8 +5,9 @@
 // 1. 注册表扫描（原实现保留）：遍历 HKLM/HKCU 下的 Uninstall 键获取结构化信息
 // 2. DisplayIcon 回退：当 InstallLocation 缺失时，尝试从 DisplayIcon / UninstallString 推导安装目录，
 //    覆盖 ComfyUI、部分便携安装器等只写入图标路径的场景
-// 3. 文件系统扫描（增强）：扫描 Program Files、Program Files (x86)、LocalAppData\Programs 以及
-//    所有非系统盘的顶层与二级目录，识别“目录内含 exe / bat / cmd”的便携/绿色应用
+// 3. 文件系统扫描（增强）：扫描 Program Files、Program Files (x86)、LocalAppData（含 Programs 子目录）以及
+//    所有非系统盘的顶层与二级目录，识别”目录内含 exe / bat / cmd”的便携/绿色应用
+//    覆盖 Squirrel 安装器（Electron 应用）直接安装到 %LOCALAPPDATA%\<appname> 的场景
 //    按规范化路径严格去重，不覆盖已由注册表获得的条目
 
 use std::collections::HashSet;
@@ -47,11 +48,11 @@ fn derive_install_location_from_icon(icon_or_uninstall: &str) -> Option<String> 
         return None;
     }
 
-    // 1) 提取首个路径片段（去掉引号与参数）
-    let stripped = raw.trim_matches('"');
-    // 去掉 ",索引" 后缀
-    let (before_comma, _) = stripped.split_once(',').unwrap_or((stripped, ""));
-    // 若带参数："C:\path\foo.exe" /S -> 取引号内；否则取空格前部分
+    // 1) 提取首个路径片段
+    // 先按逗号分割去掉 ",索引" 后缀（如 "C:\app.exe,0"），再处理引号包裹的含空格路径
+    let (before_comma, _) = raw.split_once(',').unwrap_or((raw, ""));
+    let before_comma = before_comma.trim();
+    // 引号包裹的路径直接提取引号内容；否则取第一个空格前片段
     let candidate = if before_comma.starts_with('"') {
         before_comma.trim_matches('"')
     } else {
@@ -310,7 +311,12 @@ fn collect_filesystem_roots() -> (Vec<PathBuf>, Vec<PathBuf>) {
         shallow_roots.push(PathBuf::from(pf86));
     }
     if let Some(la) = std::env::var_os("LocalAppData") {
-        let programs = PathBuf::from(la).join("Programs");
+        let local_app_data = PathBuf::from(la);
+        // Squirrel 安装器（Electron 应用常用）将应用安装到 %LOCALAPPDATA%\<appname>
+        // 例如 MarkText → C:\Users\<user>\AppData\Local\marktext
+        shallow_roots.push(local_app_data.clone());
+        // Windows Store / ClickOnce 应用可能安装在 Programs 子目录下
+        let programs = local_app_data.join("Programs");
         if programs.exists() {
             shallow_roots.push(programs);
         }
