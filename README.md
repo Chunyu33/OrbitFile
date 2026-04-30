@@ -89,7 +89,7 @@ orbit-file/
 │   │   ├── DiskUsageBar.tsx     # 磁盘使用率
 │   │   ├── FilterSelect.tsx     # 下拉筛选组件
 │   │   ├── MigrationModal.tsx   # 迁移进度弹窗
-│   │   ├── TabBar.tsx           # 顶部导航
+│   │   ├── TitleBar.tsx         # 标题栏（集成 Tab 导航 + 磁盘状态）
 │   │   └── Toast.tsx            # 通知组件
 │   ├── pages/                    # 页面
 │   │   ├── AppMigration.tsx     # 应用迁移页（还原/卸载/批量）

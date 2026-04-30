@@ -387,12 +387,12 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
         </div>
       </div>
 
-      {/* 批量操作栏 */}
+      {/* 批量操作栏 — 固定高度防止选中时布局跳动 */}
       {onToggleSelect && onSelectAll && onBatchMigrate && (
-        <div className="flex items-center gap-3 px-2 pb-2">
+        <div className="flex items-center gap-3 px-2" style={{ height: '34px', minHeight: '34px' }}>
           <button
             onClick={onSelectAll}
-            className="flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)] hover:text-[var(--color-primary)] transition-colors"
+            className="flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)] hover:text-[var(--color-primary)] transition-colors flex-shrink-0"
           >
             <span className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
               selectableCount > 0 && selectedKeys && selectedKeys.size === selectableCount
@@ -405,19 +405,23 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
             </span>
             全选未迁移
           </button>
-          {selectedKeys && selectedKeys.size > 0 && (
-            <button
-              onClick={onBatchMigrate}
-              disabled={batchMigrating}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-semibold text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-              style={{ background: 'var(--color-primary)' }}
-            >
-              <ArrowRightLeft className="w-3.5 h-3.5" />
-              {batchMigrating && batchProgress
-                ? `迁移中 ${batchProgress.current}/${batchProgress.total}`
-                : `批量迁移 (${selectedKeys.size})`}
-            </button>
-          )}
+          {/* 批量按钮始终占位，通过 opacity/pointer-events 切换可见性 */}
+          <button
+            onClick={onBatchMigrate}
+            disabled={batchMigrating || !selectedKeys || selectedKeys.size === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-semibold text-white transition-all duration-200 flex-shrink-0"
+            style={{
+              background: 'var(--color-primary)',
+              opacity: selectedKeys && selectedKeys.size > 0 ? 1 : 0,
+              pointerEvents: selectedKeys && selectedKeys.size > 0 ? 'auto' : 'none',
+              transform: selectedKeys && selectedKeys.size > 0 ? 'translateY(0)' : 'translateY(4px)',
+            }}
+          >
+            <ArrowRightLeft className="w-3.5 h-3.5" />
+            {batchMigrating && batchProgress
+              ? `迁移中 ${batchProgress.current}/${batchProgress.total}`
+              : `批量迁移 (${selectedKeys?.size ?? 0})`}
+          </button>
         </div>
       )}
 
