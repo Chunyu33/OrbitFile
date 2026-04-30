@@ -48,18 +48,29 @@ fn derive_install_location_from_icon(icon_or_uninstall: &str) -> Option<String> 
         return None;
     }
 
-    // 1) 提取首个路径片段
-    // 先按逗号分割去掉 ",索引" 后缀（如 "C:\app.exe,0"），再处理引号包裹的含空格路径
+    // 1) 先按逗号分割去掉 ",索引" 后缀（如 "C:\app.exe,0"），再处理引号/无引号路径
     let (before_comma, _) = raw.split_once(',').unwrap_or((raw, ""));
     let before_comma = before_comma.trim();
-    // 引号包裹的路径直接提取引号内容；否则取第一个空格前片段
+
+    // 2) 提取实际存在的路径：引号直接提取，无引号需逐词拼接试探空格路径
     let candidate = if before_comma.starts_with('"') {
-        before_comma.trim_matches('"')
+        before_comma.trim_matches('"').to_string()
     } else {
-        before_comma.split_whitespace().next().unwrap_or(before_comma)
+        // 无引号路径可能含空格（如 C:\Program Files\App\app.exe）
+        // 从最长空格前缀递减试探，找到第一个存在的文件/目录
+        let tokens: Vec<&str> = before_comma.split_whitespace().collect();
+        let mut found = None;
+        for i in (1..=tokens.len()).rev() {
+            let joined = tokens[..i].join(" ");
+            if Path::new(&joined).exists() {
+                found = Some(joined);
+                break;
+            }
+        }
+        found?
     };
 
-    let p = Path::new(candidate);
+    let p = Path::new(&candidate);
     if !p.exists() {
         return None;
     }
@@ -83,16 +94,16 @@ fn derive_install_location_from_icon(icon_or_uninstall: &str) -> Option<String> 
     Some(dir.to_string_lossy().to_string())
 }
 
-/// 判断文件名是否看起来像安装包/卸载器而非主程序
+/// 判断文件名是否看起来像安装包/卸载器/更新器而非主程序
 /// 规则（全小写匹配）：
-/// - 显性字样：setup / install / uninstall / unins
+/// - 显性字样：setup / install / uninstall / unins / update
 /// - 版本化架构后缀：_x64.exe / _x86.exe / _win64.exe / _win32.exe
-/// - 纯版本号命名：sunloginclient_11.1.1.38222_x64.exe 等
 #[cfg(windows)]
 fn is_installer_like_exe(file_name_lower: &str) -> bool {
     if file_name_lower.contains("setup")
         || file_name_lower.contains("install") // 同时覆盖 installer
         || file_name_lower.contains("unins")
+        || file_name_lower.contains("update")  // Squirrel 更新器 (Update.exe)
     {
         return true;
     }
@@ -186,11 +197,9 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
             return Some(p);
         }
     }
-    // 只有安装包 exe 而没有伴随 dll——视为残留安装包，拒绝识别
-    if installer_exe.is_some() && !has_dll {
-        return None;
-    }
-    installer_exe
+    // 仅有安装包/更新器 exe 而没有主程序 → 视为卸载残留目录，拒绝识别
+    // Squirrel 卸载后常留下 Update.exe + 若干 DLL，这些不是可迁移的应用
+    None
 }
 
 /// 路径是否属于应当跳过的系统/空目录
@@ -416,10 +425,23 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
                             continue;
                         }
 
-                        // 幽灵条目过滤：注册表残留的路径实际已被手动删除（如 Adobe Premiere Pro 2020）
-                        // 直接验证目录存在性，避免上报不可迁移的旧条目
+                        // 幽灵条目过滤 1：注册表残留的路径实际已被手动删除
                         if !Path::new(&install_location).exists() {
                             continue;
+                        }
+
+                        // 幽灵条目过滤 2：DisplayIcon 指向的 exe 已不存在
+                        // 卸载器执行后主程序已被删除，但注册表键残留（Squirrel/Electron 应用常见）
+                        if !display_icon.is_empty() {
+                            let icon_file = display_icon
+                                .split(',')
+                                .next()
+                                .unwrap_or(&display_icon)
+                                .trim()
+                                .trim_matches('"');
+                            if !icon_file.is_empty() && !Path::new(icon_file).exists() {
+                                continue;
+                            }
                         }
 
                         // 生成唯一注册表路径，供卸载功能复用

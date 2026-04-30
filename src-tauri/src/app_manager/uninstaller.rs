@@ -31,6 +31,9 @@ const BLACKLIST: &[&str] = &["microsoft", "windows", "common files", "tauri", "w
 pub struct UninstallInput {
     pub app_id: Option<String>,
     pub registry_path: Option<String>,
+    /// 前端传入的安装路径（scanner 可能从 DisplayIcon 推导得出，
+    /// 此时注册表中的 InstallLocation 实际为空，强删需要这个字段才能定位目录）
+    pub install_location: Option<String>,
 }
 
 #[cfg(windows)]
@@ -414,17 +417,21 @@ pub fn force_remove_application(input: UninstallInput) -> Result<UninstallResult
 fn execute_force_remove(input: &UninstallInput) -> Result<(bool, bool, Option<String>), String> {
     let mut deleted_files = false;
     let mut deleted_registry = false;
-    let mut install_location: Option<String> = None;
 
-    // 按 registry_path 定位安装目录
-    if let Some(registry_path) = input.registry_path.as_ref() {
+    // 优先使用前端传入的安装路径（scanner 可能从 DisplayIcon 推导）
+    let mut install_location: Option<String> = input
+        .install_location
+        .as_ref()
+        .map(|v| sanitize_search_text(v))
+        .filter(|v| !v.is_empty());
+
+    // 按 registry_path 定位安装目录（补充 install_location + 删除注册表键）
+    if let Some(registry_path) = input.registry_path.as_ref().filter(|p| !p.trim().is_empty()) {
         if let Some((hkey, sub_path)) = parse_registry_path(registry_path) {
-            // 读取安装路径（用于删除文件）
             if let Ok(key) = RegKey::predef(hkey).open_subkey_with_flags(sub_path, KEY_READ) {
-                let loc: String = key.get_value("InstallLocation").unwrap_or_default();
-                let sanitized = sanitize_search_text(&loc);
-                if !sanitized.is_empty() {
-                    install_location = Some(sanitized);
+                // 如果前端没传安装路径，尝试从注册表读取（含 DisplayIcon 回退推导）
+                if install_location.is_none() {
+                    install_location = read_install_location_with_fallback(&key);
                 }
             }
 
@@ -461,13 +468,9 @@ fn execute_force_remove(input: &UninstallInput) -> Result<(bool, bool, Option<St
                     continue;
                 }
 
-                // 读取安装路径
+                // 如果前端没传安装路径，尝试从注册表读取（含 DisplayIcon 回退推导）
                 if install_location.is_none() {
-                    let loc: String = subkey.get_value("InstallLocation").unwrap_or_default();
-                    let sanitized = sanitize_search_text(&loc);
-                    if !sanitized.is_empty() {
-                        install_location = Some(sanitized);
-                    }
+                    install_location = read_install_location_with_fallback(&subkey);
                 }
 
                 // 删除注册表键（如果还没删过）
@@ -689,7 +692,8 @@ pub fn execute_cleanup(
 #[cfg(windows)]
 fn resolve_uninstall_commands(input: &UninstallInput) -> Result<Vec<String>, String> {
     // 路径优先：如果前端传了 registry_path，直接按路径定位
-    if let Some(registry_path) = input.registry_path.as_ref() {
+    // 空字符串等同于未提供，跳过以免 parse_registry_path 返回 None 导致误报
+    if let Some(registry_path) = input.registry_path.as_ref().filter(|p| !p.trim().is_empty()) {
         let cmds = expand_uninstall_command_candidates(read_uninstall_commands_from_registry_path(registry_path));
         if !cmds.is_empty() {
             return Ok(cmds);
@@ -1030,6 +1034,7 @@ fn parse_program_and_args(command: &str) -> Option<(String, Vec<String>)> {
         return None;
     }
 
+    // 引号包裹的路径直接提取引号内容作为程序路径
     if let Some(rest) = cmd.strip_prefix('"') {
         let end = rest.find('"')?;
         let program = rest[..end].trim().to_string();
@@ -1037,10 +1042,31 @@ fn parse_program_and_args(command: &str) -> Option<(String, Vec<String>)> {
         return Some((program, split_command_args(args_raw)));
     }
 
-    let mut parts = cmd.splitn(2, char::is_whitespace);
-    let program = parts.next()?.trim().to_string();
-    let args_raw = parts.next().unwrap_or("").trim();
-    Some((program, split_command_args(args_raw)))
+    // 无引号命令：不能简单按第一个空格拆分，因为路径可能含空格
+    // 例如 C:\Program Files (x86)\App\uninst.exe /S
+    // 从最长可能前缀开始递减试探，找到第一个实际存在的文件/目录作为程序路径
+    // 若都不存在则回退到原始简单拆分（兼容 msiexec /X{GUID} 等 PATH 命令）
+    let tokens: Vec<&str> = cmd.split_whitespace().collect();
+    for i in (1..=tokens.len()).rev() {
+        let candidate = tokens[..i].join(" ");
+        if Path::new(&candidate).exists() {
+            let args = if i < tokens.len() {
+                tokens[i..].iter().map(|s| s.to_string()).collect()
+            } else {
+                Vec::new()
+            };
+            return Some((candidate, args));
+        }
+    }
+
+    // 回退：没有任何拼接路径存在时，取第一个 token 作为程序名
+    let program = tokens[0].to_string();
+    let args = if tokens.len() > 1 {
+        tokens[1..].iter().map(|s| s.to_string()).collect()
+    } else {
+        Vec::new()
+    };
+    Some((program, args))
 }
 
 #[cfg(windows)]
@@ -1868,6 +1894,7 @@ fn parse_registry_path(path: &str) -> Option<(HKEY, &str)> {
 }
 
 #[cfg(windows)]
+#[cfg(windows)]
 fn is_valid_uninstall_command(command: &str) -> bool {
     let trimmed = command.trim();
     if trimmed.is_empty() {
@@ -1880,4 +1907,101 @@ fn is_valid_uninstall_command(command: &str) -> bool {
     }
 
     normalized != "\\" && normalized != "\\\\" && normalized != "/"
+}
+
+/// 从注册表键读取安装路径，含 DisplayIcon / UninstallString 回退推导
+/// 与 scanner::derive_install_location_from_icon 逻辑一致，确保
+/// 即使注册表 InstallLocation 为空也能找到实际安装目录
+#[cfg(windows)]
+fn read_install_location_with_fallback(key: &RegKey) -> Option<String> {
+    // 1) 直接读取 InstallLocation
+    let loc: String = key.get_value("InstallLocation").unwrap_or_default();
+    let sanitized = sanitize_search_text(&loc);
+    if !sanitized.is_empty() {
+        return Some(sanitized);
+    }
+
+    // 2) 尝试从 DisplayIcon 推导
+    let display_icon: String = key.get_value("DisplayIcon").unwrap_or_default();
+    if !display_icon.is_empty() {
+        if let Some(dir) = derive_install_location_from_icon(&display_icon) {
+            return Some(dir);
+        }
+    }
+
+    // 3) 尝试从 UninstallString 推导
+    let uninstall_string: String = key.get_value("UninstallString").unwrap_or_default();
+    if !uninstall_string.is_empty() {
+        if let Some(dir) = derive_install_location_from_icon(&uninstall_string) {
+            return Some(dir);
+        }
+    }
+
+    None
+}
+
+/// 从 DisplayIcon / UninstallString 字段尝试推导安装目录
+/// 形式如 "C:\path\app.exe,0" 或 "\"C:\path\uninst.exe\" /S"
+#[cfg(windows)]
+fn derive_install_location_from_icon(icon_or_uninstall: &str) -> Option<String> {
+    let raw = icon_or_uninstall.trim();
+    if raw.is_empty() {
+        return None;
+    }
+
+    // 1) 先按逗号分割去掉 ",索引" 后缀（如 "C:\app.exe,0"）
+    let (before_comma, _) = raw.split_once(',').unwrap_or((raw, ""));
+    let before_comma = before_comma.trim();
+
+    // 2) 提取实际存在的路径
+    let path_str = find_existing_path_fragment(before_comma)?;
+    let p = Path::new(&path_str);
+
+    // 若候选路径是文件，返回其父目录；若是目录，直接使用
+    let dir = if p.is_file() {
+        p.parent()?.to_path_buf()
+    } else {
+        p.to_path_buf()
+    };
+
+    // 过滤掉系统/无意义目录
+    let lower = dir.to_string_lossy().to_lowercase();
+    if lower.contains("\\windows\\system32")
+        || lower.contains("\\windows\\syswow64")
+        || lower.contains("\\common files\\")
+    {
+        return None;
+    }
+
+    Some(dir.to_string_lossy().to_string())
+}
+
+/// 从可能含空格且无引号的字符串中提取第一个实际存在的文件/目录路径
+/// 例如 "C:\Program Files\App\app.exe" → 逐词拼接试探直到找到存在路径
+/// 如果已用引号包裹，直接提取引号内容
+#[cfg(windows)]
+fn find_existing_path_fragment(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    // 引号包裹：直接提取引号内容
+    if trimmed.starts_with('"') {
+        let rest = &trimmed[1..];
+        let end = rest.find('"')?;
+        return Some(rest[..end].to_string());
+    }
+
+    // 无引号：从最长前缀递减试探，找到第一个存在的文件/目录
+    // 处理 C:\Program Files\App\app.exe 这类含空格的路径
+    let tokens: Vec<&str> = trimmed.split_whitespace().collect();
+    for i in (1..=tokens.len()).rev() {
+        let candidate = tokens[..i].join(" ");
+        if Path::new(&candidate).exists() {
+            return Some(candidate);
+        }
+    }
+
+    None
 }

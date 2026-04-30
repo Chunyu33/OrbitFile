@@ -164,6 +164,7 @@ export default function AppMigration() {
         input: {
           app_id: app.display_name,
           registry_path: app.registry_path,
+          install_location: app.install_location,
         },
       });
       previewCommands = preview.commands;
@@ -184,7 +185,7 @@ export default function AppMigration() {
       try {
         setUninstallingKey(currentUninstallKey);
         const result = await invoke<UninstallResult>('force_remove_application', {
-          input: { app_id: app.display_name, registry_path: app.registry_path },
+          input: { app_id: app.display_name, registry_path: app.registry_path, install_location: app.install_location },
         });
         if (result.success) {
           showToast(result.message, 'success');
@@ -221,7 +222,7 @@ export default function AppMigration() {
       setUninstallingKey(currentUninstallKey);
 
       const result = await invoke<UninstallResult>('uninstall_application', {
-        input: { app_id: app.display_name, registry_path: app.registry_path },
+        input: { app_id: app.display_name, registry_path: app.registry_path, install_location: app.install_location },
       });
 
       if (result.success) {
