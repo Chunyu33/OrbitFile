@@ -75,6 +75,21 @@ export interface CleanupResult {
   failed_items: string[];
 }
 
+/** 幽灵链接预览条目 */
+export interface GhostLinkEntry {
+  record_id: string;
+  app_name: string;
+  original_path: string;
+  target_path: string;
+  size: number;
+}
+
+/** 幽灵链接预览结果 */
+export interface GhostLinkPreview {
+  entries: GhostLinkEntry[];
+  total_size: number;
+}
+
 /**
  * 磁盘使用信息接口
  * 对应 Rust 后端的 DiskUsage 结构体

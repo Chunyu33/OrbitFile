@@ -1240,18 +1240,21 @@ fn restore_large_folder_inner(
     let target_path = PathBuf::from(target_str);
     let junction = junction_path;
 
-    // 步骤 1: 删除 Junction
+    // 步骤 1: 还原前检查目标盘空间（必须在删除 Junction 之前）
+    let file_size = get_size(&target_path).unwrap_or(0);
+    let original_parent = junction.parent()
+        .ok_or("无法获取原路径的父目录")?;
+    check_disk_space_for_restore(original_parent, file_size)?;
+
+    // 步骤 2: 删除 Junction
     fs::remove_dir(junction).map_err(|e| {
         format!("无法删除符号链接: {}", e)
     })?;
 
-    // 步骤 2: 移动文件夹回原位置
+    // 步骤 3: 移动文件夹回原位置
     let mut options = CopyOptions::new();
     options.overwrite = false;
     options.copy_inside = false;
-
-    let original_parent = junction.parent()
-        .ok_or("无法获取原路径的父目录")?;
 
     move_dir(&target_path, original_parent, &options).map_err(|e| {
         // 移动失败，尝试恢复 Junction（回滚）
@@ -1654,24 +1657,24 @@ pub(crate) fn add_migration_record(
 }
 
 /// 更新迁移记录状态
-/// 根据原始路径查找记录并更新状态
+/// 根据原始路径查找记录并更新状态（大小写不敏感匹配，兼容路径格式差异）
 fn update_migration_record_status(original_path: &str, new_status: &str) -> Result<(), String> {
     let mut storage = load_history();
-    
+
     // 查找匹配的记录并更新状态
     let mut found = false;
     for record in storage.records.iter_mut() {
-        if record.original_path == original_path && record.status == "active" {
+        if record.original_path.eq_ignore_ascii_case(original_path) && record.status == "active" {
             record.status = new_status.to_string();
             found = true;
             break;
         }
     }
-    
+
     if !found {
         return Err(format!("未找到路径 {} 的迁移记录", original_path));
     }
-    
+
     save_history(&storage)?;
     Ok(())
 }
@@ -1841,6 +1844,50 @@ fn clean_ghost_links() -> Result<CleanupResult, String> {
     })
 }
 
+/// 幽灵链接预览条目
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GhostLinkEntry {
+    pub record_id: String,
+    pub app_name: String,
+    pub original_path: String,
+    pub target_path: String,
+    pub size: u64,
+}
+
+/// 幽灵链接预览结果
+#[derive(Debug, Serialize, Deserialize)]
+pub struct GhostLinkPreview {
+    pub entries: Vec<GhostLinkEntry>,
+    pub total_size: u64,
+}
+
+/// 预览幽灵链接（只读扫描，不执行删除）
+#[tauri::command]
+fn preview_ghost_links() -> Result<GhostLinkPreview, String> {
+    let storage = load_history();
+    let mut entries = Vec::new();
+    let mut total_size: u64 = 0;
+
+    for record in &storage.records {
+        if record.status != "active" {
+            continue;
+        }
+        let target_path = Path::new(&record.target_path);
+        if !target_path.exists() {
+            entries.push(GhostLinkEntry {
+                record_id: record.id.clone(),
+                app_name: record.app_name.clone(),
+                original_path: record.original_path.clone(),
+                target_path: record.target_path.clone(),
+                size: record.size,
+            });
+            total_size += record.size;
+        }
+    }
+
+    Ok(GhostLinkPreview { entries, total_size })
+}
+
 /// 清理结果结构体
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CleanupResult {
@@ -1908,6 +1955,83 @@ pub struct MigrationStats {
     pub folder_migrations: u32,
 }
 
+/// 检查目标盘是否有足够空间容纳还原文件
+/// 要求可用空间 >= 文件大小 × 1.1（10% 缓冲防止边界情况）
+/// 返回 (可用空间, 所需空间) 或错误信息
+fn check_disk_space_for_restore(target_dir: &Path, required_bytes: u64) -> Result<(u64, u64), String> {
+    let required_with_buffer = (required_bytes as f64 * 1.1) as u64;
+
+    // 从路径提取盘符（如 "C:"）
+    let target_str = target_dir.to_string_lossy();
+    let drive_prefix = if target_str.len() >= 2 && target_str.as_bytes()[1] == b':' {
+        target_str[..2].to_string() + "\\"
+    } else {
+        return Err("无法确定目标盘符".to_string());
+    };
+
+    let disks = Disks::new_with_refreshed_list();
+    for disk in disks.list() {
+        let mount = disk.mount_point().to_string_lossy().to_string();
+        if mount.starts_with(&drive_prefix[..1]) || mount.eq_ignore_ascii_case(&drive_prefix) {
+            let available = disk.available_space();
+            if available < required_with_buffer {
+                return Err(format!(
+                    "目标磁盘空间不足：需要 {} 字节（含 10% 缓冲），可用 {} 字节",
+                    required_with_buffer, available
+                ));
+            }
+            return Ok((available, required_with_buffer));
+        }
+    }
+
+    Err(format!("未找到目标磁盘: {}", drive_prefix))
+}
+
+/// 导出迁移历史记录到指定路径
+#[tauri::command]
+fn export_history(dest_path: String) -> Result<(), String> {
+    let src = get_history_file_path();
+    if !src.exists() {
+        return Err("历史记录文件不存在，请先执行迁移操作".to_string());
+    }
+    fs::copy(&src, &dest_path)
+        .map_err(|e| format!("导出失败: {}", e))?;
+    Ok(())
+}
+
+/// 从指定路径导入并合并迁移历史记录（按 id 去重）
+#[tauri::command]
+fn import_history(src_path: String) -> Result<u32, String> {
+    let import_path = Path::new(&src_path);
+    if !import_path.exists() {
+        return Err("导入文件不存在".to_string());
+    }
+
+    let contents = fs::read_to_string(import_path)
+        .map_err(|e| format!("读取导入文件失败: {}", e))?;
+
+    let imported: HistoryStorage = serde_json::from_str(&contents)
+        .map_err(|e| format!("导入文件格式无效: {}", e))?;
+
+    let mut current = load_history();
+    let existing_ids: std::collections::HashSet<String> =
+        current.records.iter().map(|r| r.id.clone()).collect();
+
+    let mut added: u32 = 0;
+    for record in imported.records {
+        if !existing_ids.contains(&record.id) {
+            current.records.push(record);
+            added += 1;
+        }
+    }
+
+    if added > 0 {
+        save_history(&current)?;
+    }
+
+    Ok(added)
+}
+
 /// 恢复应用命令
 /// 将已迁移的应用恢复到原始位置
 /// 
@@ -1972,8 +2096,15 @@ fn restore_app(history_id: String) -> Result<MigrationResult, String> {
             });
         }
         
-        // ========== 步骤 3: 删除 Junction 链接 ==========
-        
+        // ========== 步骤 3: 还原前空间检查（必须在删除 Junction 之前） ==========
+
+        let file_size = get_size(&target_path).unwrap_or(record.size);
+        let original_parent = original_path.parent()
+            .ok_or("无法获取原路径的父目录")?;
+        check_disk_space_for_restore(original_parent, file_size)?;
+
+        // ========== 步骤 4: 删除 Junction 链接 ==========
+
         if original_path.exists() {
             // 删除符号链接（不会删除目标文件）
             // 在 Windows 上，删除 Junction 使用 remove_dir
@@ -1981,26 +2112,22 @@ fn restore_app(history_id: String) -> Result<MigrationResult, String> {
                 format!("删除符号链接失败: {}。请确保没有程序正在使用该目录。", e)
             })?;
         }
-        
-        // ========== 步骤 4: 移回文件 ==========
-        
+
+        // ========== 步骤 5: 移回文件 ==========
+
         // 使用 fs_extra 移动整个目录
         let mut options = CopyOptions::new();
         options.overwrite = false;
         options.copy_inside = false;
-        
-        // 获取原路径的父目录
-        let original_parent = original_path.parent()
-            .ok_or("无法获取原路径的父目录")?;
-        
+
         // 移动目录
         move_dir(&target_path, original_parent, &options).map_err(|e| {
             // 移动失败，尝试恢复 Junction
             let _ = symlink_dir(&target_path, &original_path);
             format!("移动文件失败: {}。已恢复符号链接。", e)
         })?;
-        
-        // ========== 步骤 5: 更新记录状态 ==========
+
+        // ========== 步骤 6: 更新记录状态 ==========
         
         storage.records[record_index].status = "restored".to_string();
         save_history(&storage)?;
@@ -2089,6 +2216,8 @@ pub fn run() {
             uninstall_application,
             scan_app_residue,
             execute_cleanup,
+            export_history,
+            import_history,
             get_migration_history,
             get_migrated_paths,
             restore_app,
@@ -2101,6 +2230,7 @@ pub fn run() {
             restore_large_folder,
             check_link_status,
             clean_ghost_links,
+            preview_ghost_links,
             open_data_dir,
             get_migration_stats
         ])

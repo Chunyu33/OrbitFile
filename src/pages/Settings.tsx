@@ -15,7 +15,7 @@ import {
 import { useThemeContext } from '../App';
 import type { ThemeMode } from '../hooks/useTheme';
 import Toast, { useToast } from '../components/Toast';
-import type { DataDirConfig } from '../types';
+import type { DataDirConfig, GhostLinkPreview } from '../types';
 
 // 迁移统计信息接口
 interface MigrationStats {
@@ -138,6 +138,8 @@ export default function Settings() {
   const [stats, setStats] = useState<MigrationStats | null>(null);
   const [cleaning, setCleaning] = useState(false);
   const [cleanResult, setCleanResult] = useState<CleanupResult | null>(null);
+  const [ghostPreview, setGhostPreview] = useState<GhostLinkPreview | null>(null);
+  const [ghostScanning, setGhostScanning] = useState(false);
   const [appVersion, setAppVersion] = useState('...');
   // 数据目录状态
   const [dataDir, setDataDir] = useState('');
@@ -220,14 +222,29 @@ export default function Settings() {
     }
   }
 
-  // 清理幽灵链接
+  // 预览幽灵链接（第一步：只读扫描）
+  async function handlePreviewGhostLinks() {
+    try {
+      setGhostScanning(true);
+      setGhostPreview(null);
+      setCleanResult(null);
+      const preview = await invoke<GhostLinkPreview>('preview_ghost_links');
+      setGhostPreview(preview);
+    } catch (e) {
+      console.error('预览失败:', e);
+    } finally {
+      setGhostScanning(false);
+    }
+  }
+
+  // 执行清理幽灵链接（第二步：确认后执行）
   async function handleCleanGhostLinks() {
     try {
       setCleaning(true);
       setCleanResult(null);
       const result = await invoke<CleanupResult>('clean_ghost_links');
       setCleanResult(result);
-      // 清理后刷新统计
+      setGhostPreview(null);
       await loadStats();
     } catch (e) {
       console.error('清理失败:', e);
@@ -556,7 +573,7 @@ export default function Settings() {
           {/* 清理无效记录 */}
           <div style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
             <div className="flex items-start" style={{ gap: 'var(--spacing-3)' }}>
-              <div 
+              <div
                 className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
                 style={{ background: 'var(--color-danger-light)' }}
               >
@@ -566,32 +583,93 @@ export default function Settings() {
                 <p className="setting-label">清理无效记录</p>
                 <p className="setting-desc" style={{ marginBottom: 'var(--spacing-3)' }}>
                   扫描并清理"幽灵链接"——目标磁盘已移除或文件已删除的迁移记录。
-                  这将删除 C 盘上指向不存在位置的 Junction 链接。
+                  先预览确认，再执行清理。
                 </p>
-                
-                <button
-                  onClick={handleCleanGhostLinks}
-                  disabled={cleaning}
-                  className="btn btn-secondary"
-                  style={{ marginBottom: cleanResult ? 'var(--spacing-3)' : 0 }}
-                >
-                  {cleaning ? (
-                    <>
-                      <Loader2 className="w-4 h-4 animate-spin" />
-                      扫描中...
-                    </>
-                  ) : (
-                    <>
-                      <Trash2 className="w-4 h-4" />
-                      扫描并清理
-                    </>
-                  )}
-                </button>
+
+                {/* 第一步：扫描预览 */}
+                {!ghostPreview ? (
+                  <button
+                    onClick={handlePreviewGhostLinks}
+                    disabled={ghostScanning}
+                    className="btn btn-secondary"
+                    style={{ marginBottom: cleanResult ? 'var(--spacing-3)' : 0 }}
+                  >
+                    {ghostScanning ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        扫描中...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-4 h-4" />
+                        扫描幽灵链接
+                      </>
+                    )}
+                  </button>
+                ) : (
+                  <div style={{ marginBottom: 'var(--spacing-3)' }}>
+                    {ghostPreview.entries.length > 0 ? (
+                      <>
+                        <div className="rounded-lg border p-3 mb-3" style={{
+                          borderColor: 'var(--color-warning)',
+                          background: 'var(--color-warning-light)',
+                          maxHeight: '240px',
+                          overflowY: 'auto',
+                        }}>
+                          <p className="text-[12px] font-medium mb-2" style={{ color: 'var(--color-warning)' }}>
+                            发现 {ghostPreview.entries.length} 条幽灵链接（总计 {formatSize(ghostPreview.total_size)}）
+                          </p>
+                          {ghostPreview.entries.map(e => (
+                            <div key={e.record_id} className="text-[11px] py-1" style={{ color: 'var(--text-secondary)' }}>
+                              <span className="font-medium">{e.app_name}</span>
+                              <span className="text-[var(--text-tertiary)]"> · 原路径: {e.original_path}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={handleCleanGhostLinks}
+                            disabled={cleaning}
+                            className="btn btn-sm"
+                            style={{
+                              background: 'var(--color-danger)',
+                              color: 'var(--text-inverse)',
+                              borderColor: 'var(--color-danger)',
+                            }}
+                          >
+                            {cleaning ? (
+                              <>
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                清理中...
+                              </>
+                            ) : (
+                              <>
+                                <Trash2 className="w-3.5 h-3.5" />
+                                确认清理
+                              </>
+                            )}
+                          </button>
+                          <button
+                            onClick={() => setGhostPreview(null)}
+                            disabled={cleaning}
+                            className="btn btn-ghost btn-sm"
+                          >
+                            取消
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="text-[12px]" style={{ color: 'var(--text-tertiary)' }}>
+                        未发现幽灵链接，所有记录状态正常
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* 清理结果 */}
                 {cleanResult && (
-                  <div 
-                    style={{ 
+                  <div
+                    style={{
                       padding: 'var(--spacing-3)',
                       background: cleanResult.cleaned_count > 0 ? 'var(--color-success-light)' : 'var(--color-gray-50)',
                       borderRadius: 'var(--radius-md)',
@@ -616,6 +694,66 @@ export default function Settings() {
                     )}
                   </div>
                 )}
+              </div>
+            </div>
+
+            {/* 导出历史记录 */}
+            <div className="flex items-start mt-4" style={{ gap: 'var(--spacing-3)', borderTop: '1px solid var(--border-color)', paddingTop: 'var(--spacing-4)' }}>
+              <div
+                className="w-9 h-9 rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: 'var(--bg-hover)' }}
+              >
+                <Database className="w-4 h-4" style={{ color: 'var(--text-secondary)' }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <p className="setting-label">导入/导出历史记录</p>
+                <p className="setting-desc" style={{ marginBottom: 'var(--spacing-2)' }}>
+                  导出备份到指定目录，或从备份文件导入合并（按 ID 去重）。
+                </p>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={async () => {
+                      try {
+                        const selected = await open({
+                          directory: true,
+                          multiple: false,
+                          title: '选择导出目录',
+                        });
+                        if (!selected || typeof selected !== 'string') return;
+                        const destPath = `${selected}\\migration_history.json`;
+                        await invoke('export_history', { destPath });
+                        showToast('历史记录已导出', 'success');
+                      } catch (e) {
+                        showToast(`导出失败: ${e}`, 'error');
+                      }
+                    }}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    <Database className="w-3.5 h-3.5" />
+                    导出
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const selected = await open({
+                          multiple: false,
+                          title: '选择历史记录文件',
+                          filters: [{ name: 'JSON', extensions: ['json'] }],
+                        });
+                        if (!selected || typeof selected !== 'string') return;
+                        const added = await invoke<number>('import_history', { srcPath: selected });
+                        showToast(`已导入 ${added} 条新记录`, 'success');
+                        await loadStats();
+                      } catch (e) {
+                        showToast(`导入失败: ${e}`, 'error');
+                      }
+                    }}
+                    className="btn btn-secondary btn-sm"
+                  >
+                    <Database className="w-3.5 h-3.5" />
+                    导入
+                  </button>
+                </div>
               </div>
             </div>
           </div>
