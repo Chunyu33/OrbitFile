@@ -1,10 +1,11 @@
 // 应用列表组件 — 桌面工具风格
 // 表格化行布局，紧凑信息密度，弱化操作按钮视觉
 
-import { Package, Search, Link2, Check, ArrowRightLeft, FolderOpen } from 'lucide-react';
+import { Package, Search, X, Link2, Check, ArrowRightLeft, FolderOpen } from 'lucide-react';
 import { InstalledApp } from '../types';
 import { useState, useMemo, useDeferredValue } from 'react';
 import FilterSelect from './FilterSelect';
+import EmptyState from './EmptyState';
 
 type MigrationFilter = 'all' | 'migrated' | 'not_migrated';
 type DriveFilter = 'all' | 'c' | 'other';
@@ -307,7 +308,7 @@ export default function AppList({
   if (loading) {
     const loadingHint = '正在扫描应用...';
     return (
-      <div className="h-full flex flex-col">
+      <div className="flex-1 flex flex-col">
         <div
           className="flex items-center gap-2 mb-2 text-[12px]"
           style={{ color: 'var(--text-tertiary)' }}
@@ -321,22 +322,13 @@ export default function AppList({
   }
 
   if (apps.length === 0) {
-    const emptyMsg = '未找到可迁移的应用';
     return (
-      <div className="flex flex-col items-center justify-center py-20 text-center">
-        <Package className="w-6 h-6 mb-2" style={{ color: 'var(--text-tertiary)' }} />
-        <p
-          className="text-[13px] font-medium"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          {emptyMsg}
-        </p>
-      </div>
+      <EmptyState icon={<Package />} title="未找到可迁移的应用" description="系统扫描未发现已安装的应用" />
     );
   }
 
   return (
-    <div className="h-full flex flex-col">
+    <div className="flex-1 flex flex-col min-h-0">
       {/* toolbar */}
       <div className="flex items-center gap-2 flex-shrink-0 mb-1" style={{ padding: '2px 8px' }}>
         <div className="relative flex-1 max-w-xs">
@@ -349,7 +341,7 @@ export default function AppList({
             placeholder="搜索应用..."
             value={inputQuery}
             onChange={(e) => setInputQuery(e.target.value)}
-            className="w-full h-8 pl-7 pr-2 text-[12px] rounded border outline-none transition-colors"
+            className="w-full h-8 pl-7 pr-7 text-[12px] rounded border outline-none transition-colors"
             style={{
               background: 'var(--bg-input)',
               borderColor: 'var(--border-color)',
@@ -358,6 +350,17 @@ export default function AppList({
             onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
             onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-color)'; }}
           />
+          {inputQuery && (
+            <button
+              onClick={() => setInputQuery('')}
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded-sm"
+              style={{ color: 'var(--text-tertiary)' }}
+              onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)'; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--text-tertiary)'; }}
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
         </div>
         <FilterSelect
           value={migrationFilter}
@@ -444,10 +447,7 @@ export default function AppList({
             })}
           </div>
         ) : (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <Search className="w-5 h-5 mb-2" style={{ color: 'var(--text-tertiary)' }} />
-            <p className="text-[13px]" style={{ color: 'var(--text-secondary)' }}>未找到匹配的应用</p>
-          </div>
+          <EmptyState icon={<Search />} title="未找到匹配的应用" description="尝试调整筛选条件或搜索关键词" />
         )}
       </div>
     </div>

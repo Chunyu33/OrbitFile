@@ -578,14 +578,12 @@ export default function AppMigration() {
 
   return (
     <div className="h-full overflow-hidden flex flex-col" style={{ padding: 'var(--spacing-4) var(--spacing-5)' }}>
-      <div className="h-full max-w-5xl mx-auto w-full">
-        {/* 应用列表区域 */}
-        <section className="h-full min-h-0 flex flex-col overflow-hidden">
-          <AppList
-            apps={apps}
-            loading={appsLoading}
-            onMigrate={handleMigrate}
-            onRestore={handleRestore}
+      <div className="flex-1 max-w-5xl mx-auto w-full min-h-0 flex flex-col overflow-hidden">
+        <AppList
+          apps={apps}
+          loading={appsLoading}
+          onMigrate={handleMigrate}
+          onRestore={handleRestore}
             onUninstall={handleUninstall}
             onOpenFolder={handleOpenFolder}
             uninstallingKey={uninstallingKey}
@@ -598,7 +596,6 @@ export default function AppMigration() {
             batchMigrating={batchMigrating}
             batchProgress={batchProgress}
           />
-        </section>
       </div>
 
       {/* 迁移进度弹窗 */}

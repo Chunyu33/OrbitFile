@@ -1,5 +1,11 @@
 // 通用弹窗组件 — 桌面工具风格
 // 支持打开/关闭过渡动画
+//
+// 动画原理（React 18 兼容）：
+// 1. 打开：setTimeout 确保起始样式先被浏览器绘制，然后再切换到最终样式触发 CSS transition
+// 2. 关闭：同样用 setTimeout 等待关闭动画播完再卸载 DOM
+// 注意：用 setTimeout 而非 requestAnimationFrame，因为 React 18 会批处理 RAF 中的 setState，
+//       导致起始样式和最终样式合并为一次渲染，动画无法触发。
 
 import { ReactNode, useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
@@ -13,44 +19,38 @@ interface ModalProps {
 }
 
 export default function Modal({ isOpen, onClose, title, children, width = 640 }: ModalProps) {
-  // 动画状态：entering / open / leaving / closed
-  const [phase, setPhase] = useState<'closed' | 'entering' | 'open' | 'leaving'>('closed');
+  const [mounted, setMounted] = useState(false);
+  const [show, setShow] = useState(false);
 
   useEffect(() => {
-    if (isOpen && phase === 'closed') {
-      // 下一帧触发进入动画
-      requestAnimationFrame(() => setPhase('entering'));
-      requestAnimationFrame(() => requestAnimationFrame(() => setPhase('open')));
-    }
-    if (!isOpen && phase === 'open') {
-      setPhase('leaving');
-      const timer = setTimeout(() => setPhase('closed'), 180);
-      return () => clearTimeout(timer);
-    }
-  }, [isOpen, phase]);
-
-  // 如果外部 isOpen 变为 false 但我们还在 leaving 动画中，不要立即卸载
-  useEffect(() => {
-    if (!isOpen && phase === 'closed') {
-      // 已经关闭完成，什么都不做
-    }
-  }, [isOpen, phase]);
-
-  const handleClose = useCallback(() => {
-    if (phase === 'open') {
-      setPhase('leaving');
-      setTimeout(() => {
-        setPhase('closed');
+    if (isOpen) {
+      setMounted(true);
+      // setTimeout 不参与 React 18 批处理，确保两帧独立渲染
+      const t = setTimeout(() => setShow(true), 10);
+      return () => clearTimeout(t);
+    } else if (mounted) {
+      setShow(false);
+      const t = setTimeout(() => {
+        setMounted(false);
         onClose();
       }, 180);
+      return () => clearTimeout(t);
     }
-  }, [phase, onClose]);
+  }, [isOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (phase === 'closed') return null;
+  const handleClose = useCallback(() => {
+    setShow(false);
+    setTimeout(() => {
+      setMounted(false);
+      onClose();
+    }, 180);
+  }, [onClose]);
+
+  if (!mounted) return null;
 
   const overlayStyle: React.CSSProperties = {
     background: 'var(--bg-modal-overlay)',
-    opacity: phase === 'open' ? 1 : 0,
+    opacity: show ? 1 : 0,
     transition: 'opacity 180ms ease-out',
   };
 
@@ -60,8 +60,8 @@ export default function Modal({ isOpen, onClose, title, children, width = 640 }:
     background: 'var(--bg-modal)',
     border: '1px solid var(--border-color)',
     boxShadow: 'var(--shadow-lg)',
-    transform: phase === 'open' ? 'scale(1)' : 'scale(0.96)',
-    opacity: phase === 'open' ? 1 : 0,
+    transform: show ? 'scale(1)' : 'scale(0.96)',
+    opacity: show ? 1 : 0,
     transition: 'transform 180ms ease-out, opacity 180ms ease-out',
   };
 

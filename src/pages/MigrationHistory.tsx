@@ -1,4 +1,4 @@
-// 迁移历史页面 — 桌面工具风格
+// 迁移记录页面 — 桌面工具风格
 // 表格化行布局，紧凑信息密度
 
 import { useEffect, useState, useMemo } from 'react';
@@ -6,11 +6,12 @@ import { invoke } from '@tauri-apps/api/core';
 import {
   History, RotateCcw, RefreshCw, Loader2,
   FolderArchive, AppWindow, ArrowRight, CheckCircle2, AlertTriangle,
-  Search, ChevronDown, ChevronUp,
+  Search, X, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { MigrationRecord, MigrationResult } from '../types';
 import Toast, { useToast } from '../components/Toast';
 import FilterSelect from '../components/FilterSelect';
+import EmptyState from '../components/EmptyState';
 
 type LinkStatus = 'checking' | 'healthy' | 'broken' | 'unknown';
 
@@ -355,11 +356,22 @@ export default function MigrationHistory() {
               <input
                 type="text" placeholder="搜索名称..." value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="w-full h-8 pl-7 pr-2 text-[12px] rounded border outline-none transition-colors"
+                className="w-full h-8 pl-7 pr-7 text-[12px] rounded border outline-none transition-colors"
                 style={{ background: 'var(--bg-input)', borderColor: 'var(--border-color)', color: 'var(--text-primary)' }}
                 onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
                 onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-color)'; }}
               />
+              {searchQuery && (
+                <button
+                  onClick={() => setSearchQuery('')}
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center rounded-sm"
+                  style={{ color: 'var(--text-tertiary)' }}
+                  onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--text-primary)'; }}
+                  onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = 'var(--text-tertiary)'; }}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              )}
             </div>
             <FilterSelect value={filterType} onChange={setFilterType}
               options={[
@@ -390,15 +402,9 @@ export default function MigrationHistory() {
             <Loader2 className="w-5 h-5 animate-spin" style={{ color: 'var(--color-primary)' }} />
           </div>
         ) : records.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center">
-            <History className="w-6 h-6 mb-2" style={{ color: 'var(--text-tertiary)' }} />
-            <p className="text-[13px]" style={{ color: 'var(--text-secondary)' }}>暂无迁移记录</p>
-          </div>
+          <EmptyState icon={<History />} title="暂无迁移记录" description="迁移应用或文件夹后将在此显示" />
         ) : pageRecords.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center">
-            <Search className="w-5 h-5 mb-2" style={{ color: 'var(--text-tertiary)' }} />
-            <p className="text-[13px]" style={{ color: 'var(--text-secondary)' }}>无匹配记录</p>
-          </div>
+          <EmptyState icon={<Search />} title="无匹配记录" description="尝试调整筛选条件或搜索关键词" />
         ) : (
           <div className="flex-1 min-h-0 overflow-y-auto">
             {/* column header */}

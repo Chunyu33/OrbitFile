@@ -38,7 +38,7 @@ export function useThemeContext() {
 const tabs: { id: TabType; label: string; Icon: typeof FolderSync }[] = [
   { id: 'migration', label: '应用管理', Icon: FolderSync },
   { id: 'folders', label: '数据迁移', Icon: FolderArchive },
-  { id: 'history', label: '迁移历史', Icon: History },
+  { id: 'history', label: '迁移记录', Icon: History },
   { id: 'settings', label: '设置', Icon: SettingsIcon },
 ];
 

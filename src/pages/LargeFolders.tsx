@@ -12,6 +12,7 @@ import {
   MessageCircle, Building2, Users, Phone, Bird, Globe, Code, Package,
 } from 'lucide-react';
 import Toast, { useToast } from '../components/Toast';
+import EmptyState from '../components/EmptyState';
 import {
   LargeFolder, ProcessLockResult, LargeFolderSizeEvent,
   LargeFolderMigrationCompleteEvent, LargeFolderRestoreCompleteEvent,
@@ -398,6 +399,8 @@ export default function LargeFolders() {
                 </div>
               ))}
             </div>
+          ) : folders.length === 0 ? (
+            <EmptyState icon={<FolderOpen />} title="未检测到可迁移的文件夹" description="系统扫描未发现可管理的数据目录" />
           ) : (
             <div className="flex flex-col gap-4">
               {systemFolders.length > 0 && (
@@ -438,13 +441,6 @@ export default function LargeFolders() {
                       isMigrating={migratingFolderId === f.id} isRestoring={restoringFolderId === f.id} />
                   ))}
                 </section>
-              )}
-
-              {folders.length === 0 && (
-                <div className="flex flex-col items-center justify-center py-20 text-center">
-                  <FolderOpen className="w-6 h-6 mb-2" style={{ color: 'var(--text-tertiary)' }} />
-                  <p className="text-[13px]" style={{ color: 'var(--text-secondary)' }}>未检测到可迁移的文件夹</p>
-                </div>
               )}
             </div>
           )}
