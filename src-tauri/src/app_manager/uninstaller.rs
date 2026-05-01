@@ -250,9 +250,10 @@ fn registry_key_belongs_to_app(key: &RegKey, sub_path: &str, keywords: &[String]
 
 #[cfg(windows)]
 fn wait_until_uninstalled(input: &UninstallInput) -> bool {
-    // 卸载器进程已退出，轮询注册表确认卸载完成
-    // 部分卸载器会异步清理注册表，给予一定宽限期
-    for _ in 0..30 {
+    // 卸载进程已退出，等待子进程启动（Inno Setup 等会 fork 自身到临时目录再执行）
+    thread::sleep(Duration::from_millis(2000));
+
+    for _ in 0..60 {
         if !is_application_still_installed(input) {
             return true;
         }
@@ -263,7 +264,8 @@ fn wait_until_uninstalled(input: &UninstallInput) -> bool {
 
 #[cfg(windows)]
 fn is_application_still_installed(input: &UninstallInput) -> bool {
-    if let Some(registry_path) = input.registry_path.as_ref() {
+    // 1. 按精确 registry_path 检查注册表键
+    if let Some(registry_path) = input.registry_path.as_ref().filter(|p| !p.trim().is_empty()) {
         if let Some((hkey, sub_path)) = parse_registry_path(registry_path) {
             if RegKey::predef(hkey).open_subkey_with_flags(sub_path, KEY_READ).is_ok() {
                 return true;
@@ -271,12 +273,47 @@ fn is_application_still_installed(input: &UninstallInput) -> bool {
         }
     }
 
+    // 2. 按 DisplayName 搜索注册表
     if let Some(app_id) = input.app_id.as_ref() {
         if find_uninstall_by_display_name(app_id).is_some() {
             return true;
         }
     }
 
+    // 3. 按 InstallLocation 搜索注册表（DisplayName 不匹配时回退）
+    if let Some(location) = input.install_location.as_ref().filter(|l| !l.trim().is_empty()) {
+        if !find_uninstall_commands_by_install_location(location).is_empty() {
+            return true;
+        }
+        // 4. 文件系统兜底：安装目录中仍存在 exe/dll 则视为卸载未完成
+        if directory_contains_executables(Path::new(location)) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// 检查目录顶层是否仍包含 exe/dll 文件，用于判断卸载器是否已执行清理
+#[cfg(windows)]
+fn directory_contains_executables(dir: &Path) -> bool {
+    if !dir.is_dir() {
+        return false;
+    }
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+                let lower = ext.to_lowercase();
+                if lower == "exe" || lower == "dll" {
+                    return true;
+                }
+            }
+        }
+    }
     false
 }
 
@@ -776,6 +813,19 @@ fn resolve_uninstall_commands(input: &UninstallInput) -> Result<Vec<String>, Str
         if !cmds.is_empty() {
             return Ok(cmds);
         }
+        // DisplayName 精确匹配失败时，回退按 InstallLocation 搜索
+        // 文件系统扫描到的应用，display_name 取自目录名，可能与注册表 DisplayName 不完全一致
+        if let Some(location) = input.install_location.as_ref().filter(|l| !l.trim().is_empty()) {
+            let cmds = find_uninstall_commands_by_install_location(location);
+            if !cmds.is_empty() {
+                return Ok(cmds);
+            }
+            // 最后兜底：在安装目录中扫描卸载器可执行文件
+            // 适用于注册表中完全没有有效卸载信息的便携/绿色应用
+            if let Some(exe_path) = scan_uninstaller_in_directory(location) {
+                return Ok(vec![exe_path]);
+            }
+        }
         let msg = format!("未找到应用 '{}' 的卸载命令", app_id);
         return Err(msg);
     }
@@ -1188,7 +1238,7 @@ fn scan_filesystem_residue(
                 path: path.to_string_lossy().to_string(),
                 item_type: item_type.to_string(),
                 size_mb,
-                selected: false,
+                selected: true,
             });
         }
     }
@@ -1234,7 +1284,7 @@ fn scan_registry_residue(
                 path: registry_path,
                 item_type: "Registry".to_string(),
                 size_mb: 0.0,
-                selected: false,
+                selected: true,
             });
         }
     }
@@ -1325,7 +1375,7 @@ fn scan_publisher_registry_residue(
                 path: registry_path,
                 item_type: "Registry".to_string(),
                 size_mb: 0.0,
-                selected: false,
+                selected: true,
             });
         }
     }
@@ -1370,7 +1420,7 @@ fn scan_classes_registry_residue(
                 path: registry_path,
                 item_type: "Registry".to_string(),
                 size_mb: 0.0,
-                selected: false,
+                selected: true,
             });
         }
     }
@@ -1859,6 +1909,123 @@ fn find_uninstall_commands_by_display_name(app_id: &str) -> Vec<String> {
     }
 
     Vec::new()
+}
+
+/// 按 InstallLocation 回退搜索卸载命令
+/// 当 DisplayName 精确匹配失败时调用，用于处理文件系统扫描到的应用
+/// （此时 display_name 来自目录名，与注册表 DisplayName 可能不完全一致）
+#[cfg(windows)]
+fn find_uninstall_commands_by_install_location(install_location: &str) -> Vec<String> {
+    let target = install_location.trim().to_lowercase();
+    if target.is_empty() {
+        return Vec::new();
+    }
+    // 归一化：统一去除尾部反斜杠，确保路径比较不受格式差异影响
+    let normalized = target.trim_end_matches('\\').to_string();
+
+    let registry_roots: [(HKEY, &str); 4] = [
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (HKEY_CURRENT_USER, r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall"),
+        (HKEY_CURRENT_USER, r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall"),
+    ];
+
+    for (hkey, path) in registry_roots {
+        let uninstall_key = match RegKey::predef(hkey).open_subkey_with_flags(path, KEY_READ) {
+            Ok(k) => k,
+            Err(_) => continue,
+        };
+
+        for subkey_name in uninstall_key.enum_keys().filter_map(|x| x.ok()) {
+            let subkey = match uninstall_key.open_subkey_with_flags(&subkey_name, KEY_READ) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+
+            let loc: String = subkey.get_value("InstallLocation").unwrap_or_default();
+            if loc.trim().to_lowercase().trim_end_matches('\\') != normalized {
+                continue;
+            }
+
+            let mut cmds = Vec::new();
+
+            let quiet: String = subkey.get_value("QuietUninstallString").unwrap_or_default();
+            if is_valid_uninstall_command(&quiet) {
+                cmds.push(quiet.trim().to_string());
+            }
+
+            let normal: String = subkey.get_value("UninstallString").unwrap_or_default();
+            if is_valid_uninstall_command(&normal) {
+                let normalized_cmd = normal.trim().to_string();
+                if !cmds.iter().any(|v| v.eq_ignore_ascii_case(&normalized_cmd)) {
+                    cmds.push(normalized_cmd);
+                }
+            }
+
+            if !cmds.is_empty() {
+                return cmds;
+            }
+        }
+    }
+
+    Vec::new()
+}
+
+/// 在安装目录中扫描卸载器可执行文件（最终兜底策略）
+/// 匹配文件名含 "unin"、"uninstall"、"卸载" 的 .exe 文件
+/// 扫描范围：安装目录顶层 + 一层子目录
+#[cfg(windows)]
+fn scan_uninstaller_in_directory(dir: &str) -> Option<String> {
+    let install_dir = Path::new(dir);
+    if !install_dir.is_dir() {
+        return None;
+    }
+    // 判断文件名是否匹配卸载器特征
+    fn looks_like_uninstaller(name: &str) -> bool {
+        let lower = name.to_lowercase();
+        lower.contains("unin") || lower.contains("uninstall") || lower.contains("卸载")
+    }
+
+    // 扫描指定目录，返回第一个匹配的 .exe 的完整路径
+    fn scan_single_dir(dir_path: &Path) -> Option<String> {
+        let entries = match std::fs::read_dir(dir_path) {
+            Ok(e) => e,
+            Err(_) => return None,
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map(|e| e == "exe").unwrap_or(false) {
+                if let Some(name) = path.file_stem().and_then(|n| n.to_str()) {
+                    if looks_like_uninstaller(name) {
+                        return Some(path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    // 1) 安装目录顶层
+    if let Some(found) = scan_single_dir(install_dir) {
+        return Some(found);
+    }
+
+    // 2) 安装目录下一层子目录
+    let sub_entries = match std::fs::read_dir(install_dir) {
+        Ok(e) => e,
+        Err(_) => return None,
+    };
+    for sub in sub_entries.flatten() {
+        let Ok(ft) = sub.file_type() else { continue };
+        if !ft.is_dir() {
+            continue;
+        }
+        if let Some(found) = scan_single_dir(&sub.path()) {
+            return Some(found);
+        }
+    }
+
+    None
 }
 
 #[cfg(windows)]
