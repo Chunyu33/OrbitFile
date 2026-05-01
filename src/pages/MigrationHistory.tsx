@@ -154,13 +154,18 @@ function HistoryRow({
         </div>
       </div>
 
-      {/* expand detail panel */}
-      {expanded && (
-        <div
-          className="px-5 py-3 grid grid-cols-2 gap-x-8 gap-y-2 text-[11px]"
-          style={{ borderTop: '1px solid var(--border-color)', background: 'var(--bg-row-hover)' }}
-          onClick={e => e.stopPropagation()}
-        >
+      {/* expand detail panel — 手风琴过渡 */}
+      <div
+        className="overflow-hidden transition-all duration-200 ease-out"
+        style={{
+          maxHeight: expanded ? '200px' : '0px',
+          opacity: expanded ? 1 : 0,
+          borderTop: expanded ? '1px solid var(--border-color)' : '1px solid transparent',
+          background: 'var(--bg-row-hover)',
+        }}
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="px-5 py-3 grid grid-cols-2 gap-x-8 gap-y-2 text-[11px]">
           <div>
             <span style={{ color: 'var(--text-tertiary)' }}>原始路径</span>
             <p className="break-all mt-0.5" style={{ color: 'var(--text-primary)' }}>{record.original_path}</p>
@@ -191,7 +196,7 @@ function HistoryRow({
             <p style={{ color: 'var(--text-primary)' }}>{formatSize(record.size)}</p>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -10,11 +10,12 @@ import {
   FolderCog, ChevronRight, User, Mail,
   FolderArchive, Trash2,
   AppWindow, Loader2, Sun, Moon, Monitor, Database,
-  Github, Video, ExternalLink,
+  Github, Video, ExternalLink, BookOpen,
 } from 'lucide-react';
 import { useThemeContext } from '../App';
 import type { ThemeMode } from '../hooks/useTheme';
 import Toast, { useToast } from '../components/Toast';
+import UserManual from '../components/UserManual';
 import type { DataDirConfig, GhostLinkPreview } from '../types';
 
 interface MigrationStats {
@@ -112,6 +113,7 @@ export default function Settings() {
   const [cleanResult, setCleanResult] = useState<CleanupResult | null>(null);
   const [ghostPreview, setGhostPreview] = useState<GhostLinkPreview | null>(null);
   const [ghostScanning, setGhostScanning] = useState(false);
+  const [manualOpen, setManualOpen] = useState(false);
   const [appVersion, setAppVersion] = useState('...');
   const [dataDir, setDataDir] = useState('');
   const [dataDirLoading, setDataDirLoading] = useState(false);
@@ -407,6 +409,27 @@ export default function Settings() {
           </div>
         </section>
 
+        {/* help */}
+        <section>
+          <SectionHeader label="帮助" />
+          <div className="rounded border" style={{ borderColor: 'var(--border-color)' }}>
+            <button onClick={() => setManualOpen(true)}
+              className="setting-item w-full text-left"
+              style={{ padding: '10px 14px', cursor: 'pointer' }}>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded flex items-center justify-center" style={{ background: 'var(--color-primary-light)' }}>
+                  <BookOpen className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
+                </div>
+                <div>
+                  <p className="setting-label">用户手册</p>
+                  <p className="setting-desc">了解功能原理、软链接机制及使用协议</p>
+                </div>
+              </div>
+              <ChevronRight className="w-3.5 h-3.5" style={{ color: 'var(--text-tertiary)' }} />
+            </button>
+          </div>
+        </section>
+
         {/* about */}
         <section>
           <SectionHeader label="关于" />
@@ -474,6 +497,7 @@ export default function Settings() {
         </div>
       </div>
 
+      <UserManual isOpen={manualOpen} onClose={() => setManualOpen(false)} />
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
     </div>
   );
