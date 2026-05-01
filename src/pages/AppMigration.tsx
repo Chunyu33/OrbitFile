@@ -156,6 +156,13 @@ export default function AppMigration() {
 
   // 强力卸载流程
   async function handleUninstall(app: InstalledApp) {
+    // 读取用户设置的删除方式（默认移入回收站）
+    let useRecycleBin = true;
+    try {
+      const saved = JSON.parse(localStorage.getItem('orbitfile_settings') || '{}');
+      useRecycleBin = saved.useRecycleBin !== false;
+    } catch { /* use default */ }
+
     // 先预览卸载命令
     let previewCommands: string[] = [];
     let previewFailed = false;
@@ -165,6 +172,7 @@ export default function AppMigration() {
           app_id: app.display_name,
           registry_path: app.registry_path,
           install_location: app.install_location,
+          use_recycle_bin: useRecycleBin,
         },
       });
       previewCommands = preview.commands;
@@ -185,7 +193,7 @@ export default function AppMigration() {
       try {
         setUninstallingKey(currentUninstallKey);
         const result = await invoke<UninstallResult>('force_remove_application', {
-          input: { app_id: app.display_name, registry_path: app.registry_path, install_location: app.install_location },
+          input: { app_id: app.display_name, registry_path: app.registry_path, install_location: app.install_location, use_recycle_bin: useRecycleBin },
         });
         if (result.success) {
           showToast(result.message, 'success');
@@ -222,7 +230,7 @@ export default function AppMigration() {
       setUninstallingKey(currentUninstallKey);
 
       const result = await invoke<UninstallResult>('uninstall_application', {
-        input: { app_id: app.display_name, registry_path: app.registry_path, install_location: app.install_location },
+        input: { app_id: app.display_name, registry_path: app.registry_path, install_location: app.install_location, use_recycle_bin: useRecycleBin },
       });
 
       if (result.success) {

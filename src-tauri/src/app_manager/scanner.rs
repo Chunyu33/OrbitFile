@@ -394,7 +394,8 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
 
         // 定义需要扫描的注册表路径
         // 包括 64 位和 32 位应用的注册表位置
-        let registry_paths: [(HKEY, &str, &str); 3] = [
+        // 扫描全部 4 个注册表 Uninstall 路径，覆盖 64 位/32 位 + 机器级/用户级
+        let registry_paths: [(HKEY, &str, &str); 4] = [
             (
                 HKEY_LOCAL_MACHINE,
                 r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
@@ -408,6 +409,11 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
             (
                 HKEY_CURRENT_USER,
                 r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall",
+                "HKCU",
+            ),
+            (
+                HKEY_CURRENT_USER,
+                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall",
                 "HKCU",
             ),
         ];

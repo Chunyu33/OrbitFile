@@ -2,7 +2,7 @@
 // 集成 Tab 导航 + 磁盘状态 — 统一顶部栏，节省垂直空间
 
 import { useState, type ReactNode } from 'react';
-import { Minus, X } from 'lucide-react';
+import { Minus, Square, Copy, X } from 'lucide-react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import ICON from "../assets/icon.svg"
 
@@ -15,9 +15,23 @@ export default function TitleBar({ centerContent, rightContent }: TitleBarProps)
   const appWindow = getCurrentWindow();
   const [closeHover, setCloseHover] = useState(false);
   const [minHover, setMinHover] = useState(false);
+  const [maxHover, setMaxHover] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
+
+  // 监听窗口最大化状态变化（如双击标题栏触发）
+  const updateMaximized = () => {
+    appWindow.isMaximized().then(setIsMaximized);
+  };
+  // 初始检测一次
+  updateMaximized();
 
   async function handleMinimize() {
     await appWindow.minimize();
+  }
+
+  async function handleToggleMaximize() {
+    await appWindow.toggleMaximize();
+    updateMaximized();
   }
 
   async function handleClose() {
@@ -40,8 +54,8 @@ export default function TitleBar({ centerContent, rightContent }: TitleBarProps)
         </span>
       </div>
 
-      {/* 中间：Tab 导航（无拖拽区域，可点击） */}
-      <div className="flex-1 flex items-center justify-center">
+      {/* 中间：Tab 导航（拖拽区域背景，Tab 按钮自动排除拖拽） */}
+      <div data-tauri-drag-region className="flex-1 flex items-center justify-center">
         {centerContent}
       </div>
 
@@ -71,6 +85,29 @@ export default function TitleBar({ centerContent, rightContent }: TitleBarProps)
             }}
           >
             <Minus style={{ width: '16px', height: '16px', color: 'var(--text-tertiary)' }} />
+          </button>
+
+          <button
+            onClick={handleToggleMaximize}
+            onMouseEnter={() => setMaxHover(true)}
+            onMouseLeave={() => setMaxHover(false)}
+            style={{
+              width: '46px',
+              height: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: maxHover ? 'var(--bg-hover)' : 'transparent',
+              border: 'none',
+              cursor: 'pointer',
+              transition: 'background 0.15s ease',
+            }}
+          >
+            {isMaximized ? (
+              <Copy style={{ width: '14px', height: '14px', color: 'var(--text-tertiary)' }} />
+            ) : (
+              <Square style={{ width: '14px', height: '14px', color: 'var(--text-tertiary)' }} />
+            )}
           </button>
 
           <button

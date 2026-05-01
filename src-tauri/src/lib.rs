@@ -1771,6 +1771,27 @@ fn check_link_status(record_id: String) -> Result<LinkStatusResult, String> {
 ///    - 删除原路径的 Junction（如果存在）
 ///    - 将记录状态标记为 "ghost_cleaned"
 /// 4. 返回清理的记录数量
+/// 在文件资源管理器中打开数据目录
+#[tauri::command]
+fn open_data_dir() -> Result<(), String> {
+    let data_dir = ensure_data_dir();
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(data_dir.to_string_lossy().as_ref())
+            .spawn()
+            .map_err(|e| format!("无法打开资源管理器: {}", e))?;
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::process::Command::new("open")
+            .arg(data_dir.to_string_lossy().as_ref())
+            .spawn()
+            .map_err(|e| format!("无法打开文件管理器: {}", e))?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn clean_ghost_links() -> Result<CleanupResult, String> {
     let mut storage = load_history();
@@ -2080,6 +2101,7 @@ pub fn run() {
             restore_large_folder,
             check_link_status,
             clean_ghost_links,
+            open_data_dir,
             get_migration_stats
         ])
         .run(tauri::generate_context!())

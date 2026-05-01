@@ -40,6 +40,8 @@ lazy_static = "1.5"
 dirs = "5.0"
 # 目录递归遍历，用于强力卸载残留扫描
 walkdir = "2.5"
+# 回收站支持（跨平台），避免误删无法恢复
+trash = "5"
 
 # Windows API 绑定，用于提取应用图标
 [target.'cfg(windows)'.dependencies]

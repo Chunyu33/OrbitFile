@@ -8,7 +8,7 @@ import { open, confirm } from '@tauri-apps/plugin-dialog';
 import { getVersion } from '@tauri-apps/api/app';
 import AppIconSvg from '../assets/icon.svg';
 import {
-  FolderCog, Shield, CheckCircle, ChevronRight, User, Mail, Info,
+  FolderCog, ChevronRight, User, Mail, Info,
   AlertTriangle, Lightbulb, FolderArchive, Trash2,
   AppWindow, Loader2, Sparkles, Sun, Moon, Monitor, Database
 } from 'lucide-react';
@@ -62,8 +62,7 @@ const SETTINGS_KEY = 'orbitfile_settings';
 // 默认设置
 const DEFAULT_SETTINGS = {
   defaultTargetPath: 'D:\\Apps',
-  backupEnabled: true,
-  verifyEnabled: true,
+  useRecycleBin: true,
 };
 
 // 加载设置
@@ -209,6 +208,15 @@ export default function Settings() {
       showToast(`迁移失败: ${e}`, 'error');
     } finally {
       setDataDirLoading(false);
+    }
+  }
+
+  // 在文件资源管理器中打开数据目录
+  async function handleOpenDataDir() {
+    try {
+      await invoke('open_data_dir');
+    } catch (e) {
+      showToast(`打开失败: ${e}`, 'error');
     }
   }
 
@@ -438,38 +446,21 @@ export default function Settings() {
             </div>
           </button>
 
-          {/* 迁移前备份 */}
+          {/* 删除方式 */}
           <div className="setting-item" style={{ padding: 'var(--spacing-4) var(--spacing-5)', margin: 0, borderBottom: '1px solid var(--border-color)' }}>
             <div className="flex items-center" style={{ gap: 'var(--spacing-3)' }}>
-              <div 
+              <div
                 className="w-9 h-9 rounded-lg flex items-center justify-center"
-                style={{ background: 'var(--color-success-light)' }}
+                style={{ background: 'var(--color-info-light)' }}
               >
-                <Shield className="w-4 h-4" style={{ color: 'var(--color-success)' }} />
+                <Trash2 className="w-4 h-4" style={{ color: 'var(--color-info)' }} />
               </div>
               <div>
-                <p className="setting-label">迁移前创建备份</p>
-                <p className="setting-desc">在迁移前自动备份原始文件</p>
+                <p className="setting-label">删除文件移入回收站</p>
+                <p className="setting-desc">关闭后直接彻底删除（不可逆）</p>
               </div>
             </div>
-            <Toggle active={settings.backupEnabled} onChange={() => updateSetting('backupEnabled', !settings.backupEnabled)} />
-          </div>
-
-          {/* 验证完整性 */}
-          <div className="setting-item" style={{ padding: 'var(--spacing-4) var(--spacing-5)', margin: 0, border: 'none' }}>
-            <div className="flex items-center" style={{ gap: 'var(--spacing-3)' }}>
-              <div 
-                className="w-9 h-9 rounded-lg flex items-center justify-center"
-                style={{ background: 'var(--color-warning-light)' }}
-              >
-                <CheckCircle className="w-4 h-4" style={{ color: 'var(--color-warning)' }} />
-              </div>
-              <div>
-                <p className="setting-label">验证文件完整性</p>
-                <p className="setting-desc">迁移后校验文件哈希值</p>
-              </div>
-            </div>
-            <Toggle active={settings.verifyEnabled} onChange={() => updateSetting('verifyEnabled', !settings.verifyEnabled)} />
+            <Toggle active={settings.useRecycleBin} onChange={() => updateSetting('useRecycleBin', !settings.useRecycleBin)} />
           </div>
         </section>
 
@@ -515,23 +506,33 @@ export default function Settings() {
                 )}
               </div>
             </div>
-            <button
-              onClick={handleChangeDataDir}
-              disabled={dataDirLoading}
-              className="h-8 px-3 text-[12px] font-medium rounded-md border border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors inline-flex items-center gap-1.5 disabled:opacity-50 flex-shrink-0"
-            >
-              {dataDirLoading ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  迁移中
-                </>
-              ) : (
-                <>
-                  <FolderCog className="w-3.5 h-3.5" />
-                  更改
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <button
+                onClick={handleChangeDataDir}
+                disabled={dataDirLoading}
+                className="h-8 px-3 text-[12px] font-medium rounded-md border border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors inline-flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {dataDirLoading ? (
+                  <>
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                    迁移中
+                  </>
+                ) : (
+                  <>
+                    <FolderCog className="w-3.5 h-3.5" />
+                    更改
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleOpenDataDir}
+                className="h-8 px-3 text-[12px] font-medium rounded-md border border-[var(--border-color)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors inline-flex items-center gap-1.5"
+                title="在文件资源管理器中打开数据目录"
+              >
+                <FolderArchive className="w-3.5 h-3.5" />
+                前往
+              </button>
+            </div>
           </div>
         </section>
 
