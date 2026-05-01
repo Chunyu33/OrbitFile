@@ -1,24 +1,19 @@
-// 应用列表组件
+// 应用列表组件 — 桌面工具风格
+// 表格化行布局，紧凑信息密度，弱化操作按钮视觉
 
-import { Package, Search, FolderOpen, Link2, Check, ArrowRightLeft } from 'lucide-react';
-
+import { Package, Search, Link2, Check, ArrowRightLeft, FolderOpen } from 'lucide-react';
 import { InstalledApp } from '../types';
 import { useState, useMemo, useDeferredValue } from 'react';
 import FilterSelect from './FilterSelect';
 
-// 迁移状态筛选选项
 type MigrationFilter = 'all' | 'migrated' | 'not_migrated';
-// 盘符筛选选项
 type DriveFilter = 'all' | 'c' | 'other';
 
-// 从应用列表中提取所有盘符（高性能：仅遍历已加载的 apps，不调用系统 API）
 function extractDriveLetters(apps: InstalledApp[]): string[] {
   const drives = new Set<string>();
   for (const app of apps) {
     const match = app.install_location.match(/^([A-Za-z]):/i);
-    if (match) {
-      drives.add(match[1].toUpperCase());
-    }
+    if (match) drives.add(match[1].toUpperCase());
   }
   return Array.from(drives).sort();
 }
@@ -33,7 +28,6 @@ interface AppListProps {
   uninstallingKey?: string | null;
   restoringKey?: string | null;
   migratedPaths?: string[];
-  // 批量迁移
   selectedKeys?: Set<string>;
   onToggleSelect?: (app: InstalledApp) => void;
   onSelectAll?: () => void;
@@ -42,73 +36,45 @@ interface AppListProps {
   batchProgress?: { current: number; total: number };
 }
 
-// 格式化文件大小
 function formatSize(kb: number): string {
-  if (kb === 0) return '未知';
+  if (kb === 0) return '—'; // em dash
   if (kb < 1024) return `${kb} KB`;
   if (kb < 1024 * 1024) return `${(kb / 1024).toFixed(1)} MB`;
   return `${(kb / (1024 * 1024)).toFixed(2)} GB`;
 }
 
-// 根据应用名生成头像颜色
-function getAvatarColor(name: string, isMigrated: boolean): string {
-  if (isMigrated) return 'var(--color-success)';
-  const colors = ['#2563EB', '#7C3AED', '#DC2626', '#0891B2', '#6B7280', '#059669'];
-  return colors[name.charCodeAt(0) % colors.length];
-}
-
-
-// 应用图标组件 - 显示真实图标或首字母回退
-function AppIcon({ app, isMigrated }: { app: InstalledApp; isMigrated: boolean }) {
-  const initial = app.display_name.charAt(0).toUpperCase();
-  const bgColor = getAvatarColor(app.display_name, isMigrated);
-  
-  // 如果有 Base64 图标数据，显示真实图标
+function AppIcon({ app }: { app: InstalledApp }) {
   if (app.icon_base64) {
     return (
-      <div 
-        className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden"
-        style={{ backgroundColor: 'var(--color-gray-100)' }}
+      <div
+        className="w-7 h-7 rounded flex items-center justify-center flex-shrink-0 overflow-hidden"
+        style={{ background: 'var(--color-gray-100)' }}
       >
-        <img 
-          src={app.icon_base64} 
-          alt={app.display_name}
-          className="w-8 h-8 object-contain"
-          onError={(e) => {
-            // 图标加载失败时隐藏图片，显示首字母
-            (e.target as HTMLImageElement).style.display = 'none';
-          }}
+        <img
+          src={app.icon_base64}
+          alt=""
+          className="w-5 h-5 object-contain"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
         />
       </div>
     );
   }
-  
-  // 回退到首字母图标
+  const initial = app.display_name.charAt(0).toUpperCase();
+  const hue = (app.display_name.charCodeAt(0) * 37) % 360;
   return (
-    <div 
-      className="w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0"
-      style={{ backgroundColor: bgColor }}
+    <div
+      className="w-7 h-7 rounded flex items-center justify-center flex-shrink-0 text-[11px] font-semibold text-white"
+      style={{ background: `hsl(${hue}, 55%, 55%)` }}
     >
-      <span style={{ color: 'white', fontWeight: 'var(--font-weight-semibold)', fontSize: 'var(--font-size-sm)' }}>
-        {initial}
-      </span>
+      {initial}
     </div>
   );
 }
 
-// 应用行组件
 function AppRow({
-  app,
-  onMigrate,
-  onRestore,
-  onUninstall,
-  onOpenFolder,
-  isUninstalling,
-  isMigrated,
-  isRestoring,
-  isSelected,
-  onToggleSelect,
-  showCheckbox,
+  app, onMigrate, onRestore, onUninstall, onOpenFolder,
+  isUninstalling, isMigrated, isRestoring,
+  isSelected, onToggleSelect, showCheckbox,
 }: {
   app: InstalledApp;
   onMigrate: (app: InstalledApp) => void;
@@ -122,182 +88,200 @@ function AppRow({
   onToggleSelect?: (app: InstalledApp) => void;
   showCheckbox?: boolean;
 }) {
+  const rowStyle: React.CSSProperties = {
+    height: 'var(--row-height)' as unknown as string,
+    padding: '0 8px',
+    background: isSelected ? 'var(--bg-row-selected)' : 'transparent',
+    borderBottom: '1px solid var(--border-color)',
+  } as React.CSSProperties;
+
   return (
-    <div className="group relative rounded-xl bg-[var(--bg-card)] px-4 py-3 shadow-[0_1px_0_rgba(15,23,42,0.04),0_6px_18px_rgba(15,23,42,0.06)] transition-all duration-200 hover:-translate-y-[1px] hover:shadow-[0_10px_26px_rgba(15,23,42,0.1)] dark:shadow-[0_1px_0_rgba(0,0,0,0.28),0_8px_22px_rgba(0,0,0,0.28)] dark:hover:shadow-[0_12px_28px_rgba(0,0,0,0.36)]">
-      <div className="flex items-center gap-3">
-        {/* 多选复选框：已迁移不可选；hover 或已选时显示 */}
-        {showCheckbox && !isMigrated && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onToggleSelect?.(app); }}
-            className={`flex-shrink-0 w-5 h-5 rounded border-2 flex items-center justify-center transition-all
-              ${isSelected
-                ? 'bg-[var(--color-primary)] border-[var(--color-primary)]'
-                : 'border-[var(--border-color)] opacity-0 group-hover:opacity-100 hover:border-[var(--color-primary)]'
-              }`}
-            title={isSelected ? '取消选择' : '选择应用'}
+    <div
+      className="flex items-center gap-3 transition-colors relative"
+      style={rowStyle}
+      onMouseEnter={(e) => {
+        if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'var(--bg-row-hover)';
+      }}
+      onMouseLeave={(e) => {
+        if (!isSelected) (e.currentTarget as HTMLElement).style.background = 'transparent';
+      }}
+    >
+      {/* checkbox */}
+      {showCheckbox && !isMigrated && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onToggleSelect?.(app); }}
+          className={`flex-shrink-0 w-4 h-4 rounded-sm border flex items-center justify-center ${
+            isSelected
+              ? ''
+              : 'border-[var(--border-color-strong)] opacity-60 hover:opacity-100'
+          }`}
+          style={isSelected ? {
+            background: 'var(--color-primary)',
+            borderColor: 'var(--color-primary)',
+          } : undefined}
+        >
+          {isSelected && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
+        </button>
+      )}
+      {showCheckbox && isMigrated && <div className="flex-shrink-0 w-4 h-4" />}
+
+      {/* left bar for migrated */}
+      {isMigrated && (
+        <div
+          className="absolute left-0 top-0 bottom-0 w-0.5"
+          style={{ background: 'var(--color-primary)' }}
+        />
+      )}
+
+      {/* icon */}
+      <AppIcon app={app} />
+
+      {/* name + path */}
+      <div className="flex-1 min-w-0 flex items-center gap-4">
+        <div className="flex items-center gap-2 min-w-0" style={{ maxWidth: '280px' }}>
+          <span
+            className="text-[13px] font-medium truncate"
+            style={{ color: 'var(--text-primary)' }}
           >
-            {isSelected && <Check className="w-3 h-3 text-white" strokeWidth={3} />}
-          </button>
-        )}
-        {/* 已迁移应用占位（保持对齐） */}
-        {showCheckbox && isMigrated && <div className="flex-shrink-0 w-5 h-5" />}
-
-        {/* 迁移状态左边框 */}
-        {isMigrated && (
-          <span className="absolute left-0 top-3 bottom-3 w-0.5 rounded-full bg-[var(--color-primary)]" />
-        )}
-
-        {/* 应用图标 */}
-        <div className="rounded-xl p-0.5 bg-[var(--bg-hover)]/40">
-          <AppIcon app={app} isMigrated={isMigrated} />
-        </div>
-
-        {/* 应用信息 */}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="text-[13px] font-semibold text-[var(--text-primary)] truncate">
-              {app.display_name}
+            {app.display_name}
+          </span>
+          {isMigrated && (
+            <span className="badge badge-success flex-shrink-0">
+              <Link2 className="w-2.5 h-2.5" />
+              已迁移
             </span>
-            {isMigrated && (
-              <span className="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-medium rounded-full"
-                style={{ background: 'var(--color-primary-light)', color: 'var(--color-primary)' }}>
-                <Link2 className="w-2.5 h-2.5" />
-                已迁移
-              </span>
-            )}
-          </div>
-          <p className="text-[11px] text-[var(--text-tertiary)] truncate mt-0.5">
-            {app.install_location}
-          </p>
-        </div>
-
-        {/* 大小 */}
-        <div className="flex-shrink-0">
-          <div className="px-2.5 h-7 rounded-full bg-[var(--bg-hover)]/75 inline-flex items-center">
-            <span className="text-[11px] font-semibold text-[var(--text-secondary)] tabular-nums">
-              {formatSize(app.estimated_size)}
-            </span>
-          </div>
-        </div>
-
-        {/* 操作区 */}
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <button
-            onClick={() => onOpenFolder(app)}
-            className="h-8 w-8 rounded-md text-[var(--text-muted)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors inline-flex items-center justify-center"
-            title="打开目录"
-          >
-            <FolderOpen className="w-3.5 h-3.5" />
-          </button>
-
-          {isMigrated ? (
-            <button
-              onClick={() => onRestore(app)}
-              disabled={isRestoring}
-              className="h-8 min-w-[68px] px-3 text-[12px] font-medium rounded-md bg-[var(--bg-hover)] text-[var(--text-secondary)] hover:text-[var(--color-primary)] transition-colors disabled:opacity-50"
-            >
-              {isRestoring ? (
-                <span className="inline-flex items-center gap-1">
-                  <span className="w-3 h-3 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
-                  还原中
-                </span>
-              ) : (
-                '还原'
-              )}
-            </button>
-          ) : (
-            <button
-              onClick={() => onMigrate(app)}
-              className="h-8 min-w-[68px] px-3 text-[12px] font-semibold rounded-md text-white transition-opacity hover:opacity-90"
-              style={{ background: 'var(--color-primary)' }}
-            >
-              迁移
-            </button>
           )}
-
-          <button
-            onClick={() => onUninstall(app)}
-            disabled={isUninstalling}
-            className="h-8 px-3 rounded-md text-[12px] font-medium text-[var(--text-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors disabled:opacity-50"
-          >
-            {isUninstalling ? '卸载中...' : '强力卸载'}
-          </button>
         </div>
+        <span
+          className="text-[11px] truncate flex-1 min-w-0 hidden sm:block"
+          style={{ color: 'var(--text-tertiary)' }}
+          title={app.install_location}
+        >
+          {app.install_location}
+        </span>
+      </div>
+
+      {/* size */}
+      <span
+        className="text-[11px] tabular-nums flex-shrink-0 w-16 text-right"
+        style={{ color: 'var(--text-secondary)' }}
+      >
+        {formatSize(app.estimated_size)}
+      </span>
+
+      {/* actions */}
+      <div className="flex items-center gap-1 flex-shrink-0" style={{ width: '130px', justifyContent: 'flex-end' }}>
+        <button
+          onClick={() => onOpenFolder(app)}
+          className="btn btn-ghost btn-icon"
+          title="打开目录"
+        >
+          <FolderOpen className="w-3.5 h-3.5" />
+        </button>
+
+        {isMigrated ? (
+          <button
+            onClick={() => onRestore(app)}
+            disabled={isRestoring}
+            className="btn btn-sm h-6 text-[11px]"
+          >
+            {isRestoring ? '还原中...' : '还原'}
+          </button>
+        ) : (
+          <button
+            onClick={() => onMigrate(app)}
+            className="btn btn-primary btn-sm h-6 text-[11px]"
+          >
+            迁移
+          </button>
+        )}
+
+        <button
+          onClick={() => onUninstall(app)}
+          disabled={isUninstalling}
+          className="btn btn-link btn-link-danger h-6 text-[11px]"
+        >
+          {isUninstalling ? '卸载中...' : '卸载'}
+        </button>
       </div>
     </div>
   );
 }
 
-// 加载骨架屏
 function LoadingSkeleton() {
+  const items = [1, 2, 3, 4, 5, 6, 7, 8];
+  const rowStyle: React.CSSProperties = {
+    height: 'var(--row-height)' as unknown as string,
+    padding: '0 8px',
+    borderBottom: '1px solid var(--border-color)',
+  } as React.CSSProperties;
+
   return (
-    <div className="space-y-2">
-      {[1, 2, 3, 4, 5].map((i) => (
-        <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-xl border border-[var(--border-color)] bg-[var(--bg-card)] animate-pulse">
-          <div className="w-10 h-10 rounded-xl bg-[var(--bg-hover)]" />
+    <div className="flex flex-col">
+      {items.map((i) => (
+        <div key={i} className="flex items-center gap-3 animate-pulse" style={rowStyle}>
+          <div className="w-4 h-4 rounded-sm" style={{ background: 'var(--bg-row-hover)' }} />
+          <div className="w-7 h-7 rounded" style={{ background: 'var(--bg-row-hover)' }} />
           <div className="flex-1 min-w-0">
-            <div className="h-3.5 rounded w-40 mb-1.5 bg-[var(--bg-hover)]" />
-            <div className="h-3 rounded w-56 bg-[var(--bg-hover)]" />
+            <div className="h-3 rounded w-32" style={{ background: 'var(--bg-row-hover)' }} />
           </div>
-          <div className="w-20 h-8 rounded-md bg-[var(--bg-hover)]" />
+          <div className="w-16 h-3 rounded" style={{ background: 'var(--bg-row-hover)' }} />
+          <div className="flex gap-1" style={{ width: '130px', justifyContent: 'flex-end' }}>
+            <div className="w-7 h-7 rounded" style={{ background: 'var(--bg-row-hover)' }} />
+            <div className="w-12 h-7 rounded" style={{ background: 'var(--bg-row-hover)' }} />
+            <div className="w-10 h-7 rounded" style={{ background: 'var(--bg-row-hover)' }} />
+          </div>
         </div>
       ))}
     </div>
   );
 }
 
-export default function AppList({ apps, loading, onMigrate, onRestore, onUninstall, onOpenFolder, uninstallingKey = null, restoringKey = null, migratedPaths = [], selectedKeys, onToggleSelect, onSelectAll, onBatchMigrate, batchMigrating = false, batchProgress }: AppListProps) {
-  // 默认的打开目录实现（无外部回调时）
+export default function AppList({
+  apps, loading, onMigrate, onRestore, onUninstall, onOpenFolder,
+  uninstallingKey = null, restoringKey = null, migratedPaths = [],
+  selectedKeys, onToggleSelect, onSelectAll, onBatchMigrate,
+  batchMigrating = false, batchProgress,
+}: AppListProps) {
   const defaultOpenFolder = async (app: InstalledApp) => {
     try {
       const { invoke } = await import('@tauri-apps/api/core');
       await invoke('open_folder', { path: app.install_location });
     } catch (error) {
-      console.error('打开文件夹失败:', error);
+      console.error('Failed to open folder:', error);
     }
   };
   const handleOpenFolder = onOpenFolder ?? defaultOpenFolder;
   const [inputQuery, setInputQuery] = useState('');
   const [migrationFilter, setMigrationFilter] = useState<MigrationFilter>('all');
   const [driveFilter, setDriveFilter] = useState<DriveFilter>('all');
-  // 仅用 useDeferredValue 分割"输入即时响应"与"过滤计算"——比双状态+useTransition 少一层渲染
   const deferredSearchQuery = useDeferredValue(inputQuery);
   const migratedPathSet = useMemo(
     () => new Set(migratedPaths.map((path) => path.toLowerCase())),
     [migratedPaths],
   );
 
-  // 检查应用是否已迁移
-  const isAppMigrated = (app: InstalledApp): boolean => {
-    return migratedPathSet.has(app.install_location.toLowerCase());
-  };
+  const isAppMigrated = (app: InstalledApp): boolean =>
+    migratedPathSet.has(app.install_location.toLowerCase());
 
-  // 提取所有盘符（用于显示“其他盘”的具体列表）
   const availableDrives = useMemo(() => extractDriveLetters(apps), [apps]);
   const otherDrives = useMemo(() => availableDrives.filter(d => d !== 'C'), [availableDrives]);
 
   const filteredApps = useMemo(() => {
-    const normalizedQuery = deferredSearchQuery.trim().toLowerCase();
-
+    const q = deferredSearchQuery.trim().toLowerCase();
     return apps.filter(app => {
-      // 搜索关键词过滤
-      if (normalizedQuery) {
-        if (!app.display_name.toLowerCase().includes(normalizedQuery) &&
-            !app.install_location.toLowerCase().includes(normalizedQuery)) {
-          return false;
-        }
+      if (q && !app.display_name.toLowerCase().includes(q) && !app.install_location.toLowerCase().includes(q)) {
+        return false;
       }
-      // 迁移状态过滤
       if (migrationFilter !== 'all') {
         const migrated = migratedPathSet.has(app.install_location.toLowerCase());
         if (migrationFilter === 'migrated' && !migrated) return false;
         if (migrationFilter === 'not_migrated' && migrated) return false;
       }
-      // 盘符过滤
       if (driveFilter !== 'all') {
-        const driveLetter = app.install_location.charAt(0).toUpperCase();
-        if (driveFilter === 'c' && driveLetter !== 'C') return false;
-        if (driveFilter === 'other' && driveLetter === 'C') return false;
+        const dl = app.install_location.charAt(0).toUpperCase();
+        if (driveFilter === 'c' && dl !== 'C') return false;
+        if (driveFilter === 'other' && dl === 'C') return false;
       }
       return true;
     });
@@ -309,7 +293,6 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
     { value: 'not_migrated', label: '未迁移' },
   ];
 
-  // 可批量选择的数量（仅未迁移应用）
   const selectableCount = useMemo(
     () => filteredApps.filter(a => !isAppMigrated(a)).length,
     [filteredApps, migratedPathSet],
@@ -322,11 +305,15 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
   ];
 
   if (loading) {
+    const loadingHint = '正在扫描应用...';
     return (
       <div className="h-full flex flex-col">
-        <div className="flex items-center gap-2 mb-3 text-[13px] text-[var(--text-tertiary)]">
-          <div className="w-4 h-4 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
-          <span>正在扫描应用...</span>
+        <div
+          className="flex items-center gap-2 mb-2 text-[12px]"
+          style={{ color: 'var(--text-tertiary)' }}
+        >
+          <div className="w-3.5 h-3.5 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+          {loadingHint}
         </div>
         <LoadingSkeleton />
       </div>
@@ -334,127 +321,132 @@ export default function AppList({ apps, loading, onMigrate, onRestore, onUninsta
   }
 
   if (apps.length === 0) {
+    const emptyMsg = '未找到可迁移的应用';
     return (
-      <div className="flex flex-col items-center justify-center py-16 text-center">
-        <div className="w-12 h-12 rounded-xl bg-[var(--bg-hover)] flex items-center justify-center mb-3">
-          <Package className="w-5 h-5 text-[var(--text-muted)]" />
-        </div>
-        <p className="text-[14px] font-medium text-[var(--text-primary)] mb-1">未找到可迁移的应用</p>
-        <p className="text-[12px] text-[var(--text-tertiary)]">请确保 C 盘有已安装的应用程序</p>
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <Package className="w-6 h-6 mb-2" style={{ color: 'var(--text-tertiary)' }} />
+        <p
+          className="text-[13px] font-medium"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          {emptyMsg}
+        </p>
       </div>
     );
   }
 
   return (
     <div className="h-full flex flex-col">
-      {/* 搜索栏与筛选器 - 紧凑设计 */}
-      <div className="flex items-center gap-2 mb-4 p-2 rounded-xl bg-[var(--bg-card)]/80 backdrop-blur-sm shadow-[0_6px_16px_rgba(15,23,42,0.05)] dark:shadow-[0_8px_22px_rgba(0,0,0,0.25)]">
-        {/* 搜索框: flex-[3] 占 3/5 宽度，min-w-0 防溢出 */}
-        <div className="relative flex-[3] min-w-0">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-[var(--text-muted)]" />
+      {/* toolbar */}
+      <div className="flex items-center gap-2 flex-shrink-0 mb-1" style={{ padding: '2px 8px' }}>
+        <div className="relative flex-1 max-w-xs">
+          <Search
+            className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5"
+            style={{ color: 'var(--text-tertiary)' }}
+          />
           <input
             type="text"
             placeholder="搜索应用..."
             value={inputQuery}
             onChange={(e) => setInputQuery(e.target.value)}
-            className="w-full h-8 pl-8 pr-3 text-[13px] rounded-md border border-[var(--border-color)] bg-[var(--bg-card)] text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+            className="w-full h-8 pl-7 pr-2 text-[12px] rounded border outline-none transition-colors"
+            style={{
+              background: 'var(--bg-input)',
+              borderColor: 'var(--border-color)',
+              color: 'var(--text-primary)',
+            }}
+            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border-color)'; }}
           />
         </div>
+        <FilterSelect
+          value={migrationFilter}
+          onChange={setMigrationFilter}
+          options={migrationOptions}
+          className="w-[120px]"
+        />
+        <FilterSelect
+          value={driveFilter}
+          onChange={setDriveFilter}
+          options={driveOptions}
+          className="w-[120px]"
+        />
+        <span
+          className="text-[11px] flex-shrink-0 ml-1"
+          style={{ color: 'var(--text-tertiary)' }}
+        >
+          {filteredApps.length} 个
+        </span>
 
-        {/* 筛选区: flex-[2] 占 2/5 宽度，shrink-0 防止被搜索框挤压 */}
-        <div className="flex items-center gap-2 flex-[2] shrink-0">
-          {/* 迁移状态筛选 */}
-          <FilterSelect
-            value={migrationFilter}
-            onChange={setMigrationFilter}
-            options={migrationOptions}
-            className="w-[130px]"
-          />
-
-          {/* 盘符筛选 */}
-          <FilterSelect
-            value={driveFilter}
-            onChange={setDriveFilter}
-            options={driveOptions}
-            className="w-[130px]"
-          />
-
-          {/* 应用计数 */}
-          <div className="flex items-center gap-1 px-2 h-8 text-[12px] text-[var(--text-secondary)] bg-[var(--bg-hover)] rounded-md">
-            <span className="font-semibold text-[var(--text-primary)]">{filteredApps.length}</span>
-            <span>个</span>
+        {onToggleSelect && onSelectAll && onBatchMigrate && (
+          <div className="flex items-center gap-2 ml-auto">
+            <button onClick={onSelectAll} className="text-[11px] btn-link">
+              {selectableCount > 0 && selectedKeys && selectedKeys.size === selectableCount
+                ? '取消全选'
+                : '全选未迁移'}
+            </button>
+            <button
+              onClick={onBatchMigrate}
+              disabled={batchMigrating || !selectedKeys || selectedKeys.size === 0}
+              className="btn btn-primary h-7 text-[11px]"
+              style={{
+                visibility: selectedKeys && selectedKeys.size > 0 ? 'visible' : 'hidden',
+              }}
+            >
+              <ArrowRightLeft className="w-3 h-3" />
+              {batchMigrating && batchProgress
+                ? `迁移中 ${batchProgress.current}/${batchProgress.total}`
+                : `批量迁移 (${selectedKeys?.size ?? 0})`}
+            </button>
           </div>
-        </div>
+        )}
       </div>
 
-      {/* 批量操作栏 — 固定高度防止选中时布局跳动 */}
-      {onToggleSelect && onSelectAll && onBatchMigrate && (
-        <div className="flex items-center gap-3 px-2" style={{ height: '34px', minHeight: '34px' }}>
-          <button
-            onClick={onSelectAll}
-            className="flex items-center gap-1.5 text-[12px] text-[var(--text-secondary)] hover:text-[var(--color-primary)] transition-colors flex-shrink-0"
-          >
-            <span className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
-              selectableCount > 0 && selectedKeys && selectedKeys.size === selectableCount
-                ? 'bg-[var(--color-primary)] border-[var(--color-primary)]'
-                : 'border-[var(--border-color)]'
-            }`}>
-              {selectableCount > 0 && selectedKeys && selectedKeys.size === selectableCount && (
-                <Check className="w-2.5 h-2.5 text-white" strokeWidth={3} />
-              )}
-            </span>
-            全选未迁移
-          </button>
-          {/* 批量按钮始终占位，通过 opacity/pointer-events 切换可见性 */}
-          <button
-            onClick={onBatchMigrate}
-            disabled={batchMigrating || !selectedKeys || selectedKeys.size === 0}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[12px] font-semibold text-white transition-all duration-200 flex-shrink-0"
-            style={{
-              background: 'var(--color-primary)',
-              opacity: selectedKeys && selectedKeys.size > 0 ? 1 : 0,
-              pointerEvents: selectedKeys && selectedKeys.size > 0 ? 'auto' : 'none',
-              transform: selectedKeys && selectedKeys.size > 0 ? 'translateY(0)' : 'translateY(4px)',
-            }}
-          >
-            <ArrowRightLeft className="w-3.5 h-3.5" />
-            {batchMigrating && batchProgress
-              ? `迁移中 ${batchProgress.current}/${batchProgress.total}`
-              : `批量迁移 (${selectedKeys?.size ?? 0})`}
-          </button>
-        </div>
-      )}
+      {/* column header */}
+      <div
+        className="flex items-center gap-3 flex-shrink-0 text-[10px] uppercase tracking-wider"
+        style={{
+          padding: '0 8px',
+          height: '24px',
+          color: 'var(--text-tertiary)',
+          borderBottom: '1px solid var(--border-color-strong)',
+        }}
+      >
+        <div className="flex-shrink-0 w-4" />
+        <div className="flex-shrink-0 w-7" />
+        <span className="flex-1 min-w-0">名称</span>
+        <span className="flex-shrink-0 w-16 text-right">大小</span>
+        <span className="flex-shrink-0" style={{ width: '130px', textAlign: 'right' }}>操作</span>
+      </div>
 
-      {/* 应用列表 */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-1">
+      {/* list body */}
+      <div className="flex-1 min-h-0 overflow-y-auto">
         {filteredApps.length > 0 ? (
-          <div className="space-y-2 py-1">
+          <div className="flex flex-col">
             {filteredApps.map((app) => {
               const key = app.registry_path || app.install_location;
               return (
-              <AppRow
-                key={key}
-                app={app}
-                onMigrate={onMigrate}
-                onRestore={onRestore}
-                onUninstall={onUninstall}
-                onOpenFolder={handleOpenFolder}
-                isUninstalling={uninstallingKey === `${app.display_name}|${app.registry_path}`}
-                isRestoring={restoringKey === `${app.display_name}|${app.registry_path}`}
-                isMigrated={isAppMigrated(app)}
-                isSelected={selectedKeys?.has(key)}
-                onToggleSelect={onToggleSelect}
-                showCheckbox={!!onToggleSelect}
-              />
-            )})}
+                <AppRow
+                  key={key}
+                  app={app}
+                  onMigrate={onMigrate}
+                  onRestore={onRestore}
+                  onUninstall={onUninstall}
+                  onOpenFolder={handleOpenFolder}
+                  isUninstalling={uninstallingKey === `${app.display_name}|${app.registry_path}`}
+                  isRestoring={restoringKey === `${app.display_name}|${app.registry_path}`}
+                  isMigrated={isAppMigrated(app)}
+                  isSelected={selectedKeys?.has(key)}
+                  onToggleSelect={onToggleSelect}
+                  showCheckbox={!!onToggleSelect}
+                />
+              );
+            })}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="w-12 h-12 rounded-xl bg-[var(--bg-hover)] flex items-center justify-center mb-3">
-              <Search className="w-5 h-5 text-[var(--text-muted)]" />
-            </div>
-            <p className="text-[14px] font-medium text-[var(--text-primary)] mb-1">未找到匹配的应用</p>
-            <p className="text-[12px] text-[var(--text-tertiary)]">尝试使用其他关键词搜索</p>
+            <Search className="w-5 h-5 mb-2" style={{ color: 'var(--text-tertiary)' }} />
+            <p className="text-[13px]" style={{ color: 'var(--text-secondary)' }}>未找到匹配的应用</p>
           </div>
         )}
       </div>

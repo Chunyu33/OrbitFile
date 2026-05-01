@@ -84,7 +84,7 @@ export default function FilterSelect<T extends string>({
         ref={triggerRef}
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        className="h-8 w-full min-w-[88px] pl-3 pr-8 rounded-md text-[12px] text-left bg-[var(--bg-card)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors shadow-[0_1px_0_rgba(15,23,42,0.04),inset_0_1px_0_rgba(255,255,255,0.28)] dark:shadow-[0_1px_0_rgba(0,0,0,0.28),inset_0_1px_0_rgba(255,255,255,0.03)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30"
+        className="h-8 w-full min-w-[88px] pl-3 pr-8 rounded-md text-[12px] text-left bg-[var(--bg-input)] text-[var(--text-primary)] hover:bg-[var(--bg-hover)] transition-colors border border-[var(--border-color)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)]/30"
         aria-haspopup="listbox"
         aria-expanded={open}
       >
@@ -92,13 +92,13 @@ export default function FilterSelect<T extends string>({
       </button>
 
       <ChevronDown
-        className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-muted)] transition-transform ${open ? 'rotate-180' : ''}`}
+        className={`pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-[var(--text-tertiary)] transition-transform ${open ? 'rotate-180' : ''}`}
       />
 
       {open && menuPosition && createPortal(
         <div
           ref={menuRef}
-          className={`absolute top-[calc(100%+6px)] left-0 z-50 overflow-hidden rounded-lg bg-[var(--bg-card)] shadow-[0_12px_30px_rgba(15,23,42,0.18)] ring-1 ring-[var(--border-color)] dark:shadow-[0_14px_32px_rgba(0,0,0,0.45)] ${menuClassName}`}
+          className={`absolute top-[calc(100%+6px)] left-0 z-50 overflow-hidden rounded-md bg-[var(--bg-modal)] shadow-[var(--shadow-md)] ring-1 ring-[var(--border-color)] ${menuClassName}`}
           style={{
             position: 'fixed',
             top: menuPosition.top,

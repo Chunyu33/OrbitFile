@@ -41,11 +41,11 @@ export default function TitleBar({ centerContent, rightContent }: TitleBarProps)
   return (
     <div
       data-tauri-drag-region
-      className="flex items-center h-11 pl-3 pr-0 border-b select-none"
-      style={{ background: 'var(--bg-card)', borderColor: 'var(--border-color)' }}
+      className="flex items-center h-11 pl-3 pr-0 border-b select-none relative"
+      style={{ background: 'var(--bg-content)', borderColor: 'var(--border-color)' }}
     >
       {/* 左侧：Logo + 品牌名 */}
-      <div data-tauri-drag-region className="flex items-center gap-2 flex-shrink-0">
+      <div data-tauri-drag-region className="flex items-center gap-2 flex-shrink-0 relative z-10">
         <div className="flex items-center justify-center w-6 h-6">
           <img src={ICON} alt="" />
         </div>
@@ -54,13 +54,13 @@ export default function TitleBar({ centerContent, rightContent }: TitleBarProps)
         </span>
       </div>
 
-      {/* 中间：Tab 导航（拖拽区域背景，Tab 按钮自动排除拖拽） */}
-      <div data-tauri-drag-region className="flex-1 flex items-center justify-center">
+      {/* 中间：Tab 导航 — 绝对定位实现真正居中 */}
+      <div className="absolute left-1/2 -translate-x-1/2 top-0 bottom-0 flex items-center">
         {centerContent}
       </div>
 
       {/* 右侧：磁盘状态 + 窗口控制 */}
-      <div className="flex items-center h-full flex-shrink-0">
+      <div className="flex items-center h-full flex-shrink-0 ml-auto relative z-10">
         {rightContent && (
           <div className="flex items-center pr-3">
             {rightContent}

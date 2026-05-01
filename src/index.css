@@ -1,12 +1,8 @@
-/* Tailwind CSS 4.x 导入方式 */
 @import "tailwindcss";
-
-/* 导入设计系统 */
 @import "./styles/variables.css";
 @import "./styles/components.css";
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
-/* 全局样式重置 */
 *, *::before, *::after {
   box-sizing: border-box;
 }
@@ -22,32 +18,30 @@ body {
   color: var(--text-primary);
   background: var(--bg-app);
   -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
   user-select: none;
 }
 
-/* 滚动条样式 */
+/* 滚动条 - 桌面工具风格：细、低调 */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-gray-100);
-  border-radius: var(--radius-full);
+  background: transparent;
 }
 
 ::-webkit-scrollbar-thumb {
   background: var(--color-gray-300);
-  border-radius: var(--radius-full);
+  border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-gray-400);
 }
 
-/* 按钮基础样式 - 放入 @layer base 让 Tailwind utilities 可以正常覆盖 */
+/* 按钮重置 */
 @layer base {
   button {
     cursor: pointer;
@@ -65,11 +59,10 @@ body {
 
   button:focus-visible {
     outline: 2px solid var(--color-primary);
-    outline-offset: 2px;
+    outline-offset: 1px;
   }
 }
 
-/* 输入框基础样式 */
 input {
   user-select: text;
   font-family: inherit;
@@ -77,7 +70,7 @@ input {
 
 /* 动画 */
 @keyframes fadeIn {
-  from { opacity: 0; transform: translateY(-8px); }
+  from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
 }
 
@@ -87,36 +80,20 @@ input {
 }
 
 @keyframes modalIn {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.97);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
 }
 
-.animate-fade-in {
-  animation: fadeIn 0.2s ease-out;
-}
+.animate-fade-in { animation: fadeIn 0.15s ease-out; }
+.animate-spin { animation: spin 1s linear infinite; }
+.animate-modal-in { animation: modalIn 180ms ease-out; }
 
-.animate-spin {
-  animation: spin 1s linear infinite;
-}
-
-.animate-modal-in {
-  animation: modalIn 220ms cubic-bezier(0.22, 0.61, 0.36, 1);
-}
-
-/* 主题切换过渡效果 - 确保切换平滑不闪烁 */
+/* 主题切换过渡 */
 .theme-transition,
 .theme-transition *,
 .theme-transition *::before,
 .theme-transition *::after {
-  transition: background-color 300ms ease, 
-              border-color 300ms ease, 
-              color 200ms ease,
-              box-shadow 300ms ease !important;
+  transition: background-color 250ms ease,
+              border-color 250ms ease,
+              color 150ms ease !important;
 }
-

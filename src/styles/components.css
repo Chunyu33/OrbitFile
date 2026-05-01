@@ -1,14 +1,104 @@
 /* ============================================
-   OrbitFile - 精简组件样式
-   大部分样式已迁移到 Tailwind
+   OrbitFile - 组件样式
+   桌面工具风格：小圆角、无多余阴影、边框优先
    ============================================ */
 
-/* 进度条渐变 */
-.progress-fill-safe { background: linear-gradient(90deg, #16A34A, #22C55E); }
-.progress-fill-warning { background: linear-gradient(90deg, #EA580C, #F97316); }
-.progress-fill-danger { background: linear-gradient(90deg, #DC2626, #EF4444); }
+/* 进度条 */
+.progress-fill-safe { background: var(--color-primary); }
+.progress-fill-warning { background: var(--color-warning); }
+.progress-fill-danger { background: var(--color-danger); }
 
-/* 设置行布局 */
+/* ========== 按钮体系 ========== */
+
+/* 基础按钮 - 无背景，hover 有反馈 */
+.btn {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-secondary);
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.btn:hover {
+  background: var(--bg-row-hover);
+  color: var(--text-primary);
+  border-color: var(--border-color-strong);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+/* 主要操作 - 淡色填充（不再是绿色大按钮） */
+.btn-primary {
+  color: var(--color-primary);
+  border-color: var(--color-primary);
+  background: var(--color-primary-light);
+}
+
+.btn-primary:hover {
+  background: var(--color-primary);
+  color: var(--text-inverse);
+}
+
+/* 危险操作 */
+.btn-danger {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+  background: transparent;
+}
+
+.btn-danger:hover {
+  background: var(--color-danger);
+  color: var(--text-inverse);
+}
+
+/* 无边框透明按钮（图标按钮） */
+.btn-ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+}
+
+.btn-ghost:hover {
+  background: var(--bg-row-hover);
+  color: var(--text-primary);
+}
+
+/* 纯图标按钮 */
+.btn-icon {
+  width: 28px;
+  padding: 0;
+  border-color: transparent;
+}
+
+/* 文字链接按钮（最弱化） */
+.btn-link {
+  border-color: transparent;
+  background: transparent;
+  color: var(--text-tertiary);
+  padding: 0 6px;
+}
+
+.btn-link:hover {
+  color: var(--color-primary);
+  background: transparent;
+}
+
+.btn-link.btn-link-danger:hover {
+  color: var(--color-danger);
+}
+
+/* 设置行 */
 .setting-item {
   display: flex;
   align-items: center;
@@ -17,14 +107,14 @@
 }
 
 .setting-label {
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
   color: var(--text-primary);
   margin: 0;
 }
 
 .setting-desc {
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   color: var(--text-tertiary);
   margin: 2px 0 0 0;
 }
@@ -33,11 +123,11 @@
 .badge {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 2px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  font-weight: 500;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  font-weight: var(--font-weight-medium);
   white-space: nowrap;
 }
 
@@ -47,58 +137,6 @@
 }
 
 .badge-success {
-  background: var(--color-success-light, rgba(22, 163, 74, 0.12));
+  background: var(--color-success-light);
   color: var(--color-success);
-}
-
-/* 按钮体系（兼容旧用法） */
-.btn {
-  height: 34px;
-  padding: 0 12px;
-  border-radius: 8px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #fff;
-  background: var(--color-primary);
-  transition: opacity 140ms ease, background-color 140ms ease, color 140ms ease;
-}
-
-.btn:hover {
-  opacity: 0.9;
-}
-
-.btn:disabled {
-  opacity: 0.45;
-}
-
-.btn-secondary {
-  color: var(--text-secondary);
-  background: var(--bg-hover);
-  font-weight: 500;
-}
-
-.btn-secondary:hover {
-  opacity: 1;
-  color: var(--color-primary);
-}
-
-.btn-ghost {
-  color: var(--text-secondary);
-  background: transparent;
-  font-weight: 500;
-}
-
-.btn-ghost:hover {
-  opacity: 1;
-  background: var(--bg-hover);
-  color: var(--text-primary);
-}
-
-.btn-icon {
-  width: 34px;
-  padding: 0;
 }

@@ -109,8 +109,7 @@ function App() {
                     className="relative flex items-center gap-1.5 h-7 px-3 rounded-md text-[12px] font-medium transition-all duration-200"
                     style={{
                       color: isActive ? 'var(--color-primary)' : 'var(--text-secondary)',
-                      background: isActive ? 'var(--bg-card)' : 'transparent',
-                      boxShadow: isActive ? '0 1px 3px rgba(0,0,0,0.08)' : 'none',
+                      background: isActive ? 'var(--bg-content)' : 'transparent',
                     }}
                   >
                     {/* 激活态左侧小圆点 */}
@@ -138,7 +137,7 @@ function App() {
         />
 
         {/* 页面内容区域 */}
-        <main className="flex-1 overflow-hidden" style={{ background: 'var(--bg-card)' }}>
+        <main className="flex-1 overflow-hidden" style={{ background: 'var(--bg-content)' }}>
           <PageTransition pageKey={activeTab} className="h-full">
             {renderContent()}
           </PageTransition>

@@ -86,7 +86,7 @@ export default function CleanupModal({
                   style={{
                     padding: '8px 12px',
                     borderColor: item.selected ? 'var(--color-primary)' : 'var(--border-color)',
-                    background: item.selected ? 'var(--color-primary-light)' : 'var(--bg-card)',
+                    background: item.selected ? 'var(--color-primary-light)' : 'var(--bg-row)',
                   }}
                 >
                   <input
@@ -141,7 +141,7 @@ export default function CleanupModal({
             </span>
           </div>
           <div className="flex items-center" style={{ gap: 'var(--spacing-2)' }}>
-            <button className="btn btn-secondary btn-sm" onClick={onClose} disabled={loading}>
+            <button className="btn btn-sm" onClick={onClose} disabled={loading}>
               取消
             </button>
             <button

@@ -97,7 +97,7 @@ export default function MigrationModal({
             <button
               onClick={onClose}
               className="flex h-8 w-8 items-center justify-center rounded-lg transition-all"
-              style={{ color: 'var(--text-muted)' }}
+              style={{ color: 'var(--text-tertiary)' }}
               aria-label="关闭弹窗"
             >
               <X className="h-4 w-4" />
@@ -109,7 +109,7 @@ export default function MigrationModal({
         <div className="px-5 pt-10 pb-10">
           {/* 应用名称区 */}
           <div className="mb-8 text-center">
-            <p className="mb-2 text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-muted)' }}>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wider" style={{ color: 'var(--text-tertiary)' }}>
               迁移目标应用
             </p>
             <p className="truncate text-[28px] font-bold leading-tight" style={{ color: 'var(--text-primary)' }}>
@@ -151,7 +151,7 @@ export default function MigrationModal({
                   }}
                 />
               </div>
-              <p className="mt-2 text-center text-xs" style={{ color: 'var(--text-muted)' }}>{displayProgress.toFixed(0)}%</p>
+              <p className="mt-2 text-center text-xs" style={{ color: 'var(--text-tertiary)' }}>{displayProgress.toFixed(0)}%</p>
             </div>
           )}
 

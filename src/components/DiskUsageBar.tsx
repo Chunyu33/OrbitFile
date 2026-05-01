@@ -140,7 +140,6 @@ const DiskRowSkeleton = () => (
 export default function DiskUsageBar({ disks, loading, refreshing = false, onRefresh }: DiskUsageBarProps) {
   const [open, setOpen] = useState(false);
   const [capsuleHover, setCapsuleHover] = useState(false);
-  const [refreshHover, setRefreshHover] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const primaryDisk = useMemo(() => {
@@ -184,7 +183,7 @@ export default function DiskUsageBar({ disks, loading, refreshing = false, onRef
           padding: '0 12px',
           borderRadius: '999px',
           border: '1px solid var(--border-color)',
-          background: capsuleHover ? 'var(--bg-hover)' : 'var(--bg-card)',
+          background: capsuleHover ? 'var(--bg-hover)' : 'var(--bg-content)',
           color: 'var(--text-primary)',
           cursor: 'pointer',
           fontSize: '12px',
@@ -195,30 +194,6 @@ export default function DiskUsageBar({ disks, loading, refreshing = false, onRef
       >
         <PieChart style={{ width: '13px', height: '13px', color: 'var(--color-primary)' }} />
         <span>{summaryText}</span>
-      </button>
-
-      <button
-        onClick={onRefresh}
-        onMouseEnter={() => setRefreshHover(true)}
-        onMouseLeave={() => setRefreshHover(false)}
-        disabled={!onRefresh || refreshing}
-        style={{
-          width: '32px',
-          height: '32px',
-          borderRadius: '999px',
-          border: '1px solid var(--border-color)',
-          background: refreshHover && !refreshing ? 'var(--bg-hover)' : 'var(--bg-card)',
-          color: 'var(--text-secondary)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: !onRefresh || refreshing ? 'not-allowed' : 'pointer',
-          opacity: !onRefresh || refreshing ? 0.5 : 1,
-          transition: 'background 0.15s ease, border-color 0.15s ease',
-        } as CSSProperties}
-        title="刷新磁盘状态"
-      >
-        <RefreshCw style={{ width: '13px', height: '13px' }} className={refreshing ? 'animate-spin' : ''} />
       </button>
 
       {open && (
@@ -232,14 +207,24 @@ export default function DiskUsageBar({ disks, loading, refreshing = false, onRef
             padding: '12px',
             borderRadius: 'var(--radius-md)',
             border: '1px solid var(--border-color)',
-            background: 'var(--bg-card)',
-            boxShadow: 'var(--shadow-xl)',
+            background: 'var(--bg-modal)',
+            boxShadow: 'var(--shadow-lg)',
             zIndex: 1200,
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
             <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-primary)' }}>磁盘状态</span>
-            <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{disks?.length ?? 0} 个磁盘</span>
+            <div className="flex items-center gap-2">
+              <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>{disks?.length ?? 0} 个磁盘</span>
+              <button
+                onClick={(e) => { e.stopPropagation(); onRefresh?.(); }}
+                disabled={!onRefresh || refreshing}
+                className="btn btn-ghost btn-icon w-6 h-6"
+                title="刷新磁盘状态"
+              >
+                <RefreshCw style={{ width: '12px', height: '12px' }} className={refreshing ? 'animate-spin' : ''} />
+              </button>
+            </div>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>

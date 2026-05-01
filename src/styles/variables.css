@@ -1,41 +1,33 @@
 /* ============================================
    OrbitFile 设计系统 - CSS 变量定义
-   企业级模块化设计
-   
-   主题系统说明（中文）：
-   - 支持三种模式：浅色 (light)、深色 (dark)、跟随系统 (system)
-   - 深色模式采用深邃的深蓝灰色调，类似 VS Code / Windows 11 设置页面
-   - 所有颜色变量通过 CSS 变量实现，切换时自动过渡
+   桌面工具风格：克制、紧凑、专业
    ============================================ */
 
 /* ========== 浅色主题（默认） ========== */
-/* 调色说明：浅色主题以清新的 Material 绿（#4CAF50）作为品牌色
-   背景继续使用中性灯光灰，以避免全屏绿造成视觉疲劳 */
 :root,
 [data-theme="light"] {
-  /* 主题色 - Material 绿 */
-  --color-primary: #4CAF50;
-  --color-primary-hover: #43A047;
-  --color-primary-active: #2E7D32;
-  --color-primary-light: #E8F5E9;
-  --color-primary-lighter: #F1F8E9;
-  
+  /* 主题色 - 微信绿 */
+  --color-primary: #07C160;
+  --color-primary-hover: #06AD56;
+  --color-primary-active: #05944A;
+  --color-primary-light: #E8F8EF;
+  --color-primary-lighter: #F2FBF6;
+
   /* 成功色 */
-  --color-success: #16A34A;
-  --color-success-hover: #15803D;
-  --color-success-light: #F0FDF4;
-  --color-success-lighter: #DCFCE7;
-  
+  --color-success: #10B981;
+  --color-success-hover: #059669;
+  --color-success-light: #ECFDF5;
+
   /* 警告色 */
-  --color-warning: #EA580C;
-  --color-warning-hover: #C2410C;
-  --color-warning-light: #FFF7ED;
-  
+  --color-warning: #D97706;
+  --color-warning-hover: #B45309;
+  --color-warning-light: #FFFBEB;
+
   /* 危险色 */
   --color-danger: #DC2626;
   --color-danger-hover: #B91C1C;
   --color-danger-light: #FEF2F2;
-  
+
   /* 中性色 */
   --color-gray-50: #F9FAFB;
   --color-gray-100: #F3F4F6;
@@ -47,111 +39,95 @@
   --color-gray-700: #374151;
   --color-gray-800: #1F2937;
   --color-gray-900: #111827;
-  
+
   /* 背景色 */
   --bg-app: #F3F4F6;
-  --bg-card: #FFFFFF;
-  --bg-elevated: #FFFFFF;
-  --bg-hover: #F9FAFB;
-  --bg-active: #F3F4F6;
-  --bg-sidebar: #FFFFFF;
+  --bg-content: #FFFFFF;
+  --bg-row: #FFFFFF;
+  --bg-row-hover: #F4F6F8;
+  --bg-row-selected: #E8F8EF;
+  --bg-hover: #F3F4F6;
+  --bg-input: #FFFFFF;
+  --bg-toolbar: #F9FAFB;
   --bg-modal: #FFFFFF;
   --bg-modal-overlay: rgba(0, 0, 0, 0.4);
-  
+
   /* 文字色 */
-  --text-primary: #111827;
+  --text-primary: #1F2937;
   --text-secondary: #4B5563;
-  --text-tertiary: #6B7280;
-  --text-muted: #9CA3AF;
+  --text-tertiary: #9CA3AF;
   --text-inverse: #FFFFFF;
-  
+
   /* 边框 */
   --border-color: #E5E7EB;
-  --border-color-hover: #D1D5DB;
-  --border-color-focus: var(--color-primary);
-  
-  /* 阴影 */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
-  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  --border-color-strong: #D1D5DB;
+
+  /* 阴影 - 大幅减弱，仅用于弹窗 */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 
 /* ========== 深色主题 ========== */
-/* 设计原则：底色采用深邃的接近纯黑的深石板色，
-   文字、品牌与操作元素使用亮绿（例如 #66BB6A）作为焦点色
-   效果类似终端 / 占用夜间模式的工具优雅且难以疑视 */
 [data-theme="dark"] {
-  /* 主题色 - 亮绿，在黑底上保持高对比度 */
-  --color-primary: #66BB6A;
-  --color-primary-hover: #81C784;
-  --color-primary-active: #4CAF50;
-  --color-primary-light: rgba(102, 187, 106, 0.18);
-  --color-primary-lighter: rgba(102, 187, 106, 0.1);
-  
-  /* 成功色 */
+  --color-primary: #07C160;
+  --color-primary-hover: #1ED470;
+  --color-primary-active: #06AD56;
+  --color-primary-light: rgba(7, 193, 96, 0.15);
+  --color-primary-lighter: rgba(7, 193, 96, 0.08);
+
   --color-success: #34D399;
-  --color-success-hover: #4ADE80;
-  --color-success-light: rgba(52, 211, 153, 0.15);
-  --color-success-lighter: rgba(52, 211, 153, 0.1);
-  
-  /* 警告色 */
-  --color-warning: #FB923C;
-  --color-warning-hover: #FDBA74;
-  --color-warning-light: rgba(251, 146, 60, 0.15);
-  
-  /* 危险色 */
+  --color-success-hover: #6EE7B7;
+  --color-success-light: rgba(52, 211, 153, 0.12);
+
+  --color-warning: #FBBF24;
+  --color-warning-hover: #F59E0B;
+  --color-warning-light: rgba(251, 191, 36, 0.12);
+
   --color-danger: #F87171;
   --color-danger-hover: #FCA5A5;
-  --color-danger-light: rgba(248, 113, 113, 0.15);
-  
-  /* 中性色 - 深色模式反转（暖中性灰，无蓝调） */
-  --color-gray-50: #1A1F1D;
-  --color-gray-100: #1F2523;
-  --color-gray-200: #2A312E;
-  --color-gray-300: #3A423F;
-  --color-gray-400: #5C6661;
-  --color-gray-500: #7C8882;
-  --color-gray-600: #A0ACA5;
-  --color-gray-700: #C5CFCA;
-  --color-gray-800: #DFE6E2;
-  --color-gray-900: #F0F4F2;
-  
-  /* 背景色 - 接近纯黑的深石板色，分层明确 */
-  --bg-app: #0B0F0E;           /* 深檄橄黑 - 最深层背景 */
-  --bg-card: #141A18;          /* 深森林黑 - 卡片背景 */
-  --bg-elevated: #1C2421;      /* 淺深黑 - 悬浮层背景 */
-  --bg-hover: #1C2421;         /* 悬停状态 */
-  --bg-active: #263330;        /* 激活状态 */
-  --bg-sidebar: #141A18;       /* 侧边栏 */
-  --bg-modal: #141A18;         /* 弹窗背景 */
-  --bg-modal-overlay: rgba(0, 0, 0, 0.65);
-  
-  /* 文字色 - 主文字带淡绿色调，突出品牌气质 */
-  --text-primary: #E8F5E9;     /* 浅绿白 - 主文字 */
-  --text-secondary: #B8D8BC;   /* 淡绿灰 - 次级文字 */
-  --text-tertiary: #7FA386;    /* 橄榄灰 - 辅助文字 */
-  --text-muted: #5A7560;       /* 暗橄榄 - 更弱的提示 */
-  --text-inverse: #0B0F0E;     /* 深黑 - 反色文字 */
-  
-  /* 边框 - 深色模式 */
-  --border-color: #1F2A26;     /* 深橄榄 */
-  --border-color-hover: #2F423B; /* 中橄榄 */
-  --border-color-focus: var(--color-primary);
-  
-  /* 阴影 - 深色模式下更深 */
-  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.4), 0 2px 4px -2px rgba(0, 0, 0, 0.3);
-  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.4), 0 4px 6px -4px rgba(0, 0, 0, 0.3);
-  --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.4);
-  --shadow-2xl: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+  --color-danger-light: rgba(248, 113, 113, 0.12);
+
+  --color-gray-50: #121212;
+  --color-gray-100: #1A1A1A;
+  --color-gray-200: #242424;
+  --color-gray-300: #333333;
+  --color-gray-400: #5C5C5C;
+  --color-gray-500: #858585;
+  --color-gray-600: #A3A3A3;
+  --color-gray-700: #C2C2C2;
+  --color-gray-800: #E0E0E0;
+  --color-gray-900: #F2F2F2;
+
+  --bg-app: #0A0A0A;
+  --bg-content: #141414;
+  --bg-row: #141414;
+  --bg-row-hover: #1C1C1C;
+  --bg-row-selected: rgba(7, 193, 96, 0.08);
+  --bg-hover: #1C1C1C;
+  --bg-input: #1C1C1C;
+  --bg-toolbar: #101010;
+  --bg-modal: #141414;
+  --bg-modal-overlay: rgba(0, 0, 0, 0.7);
+
+  --text-primary: #EBEBEB;
+  --text-secondary: #A0A0A0;
+  --text-tertiary: #5C5C5C;
+  --text-inverse: #0A0A0A;
+
+  --border-color: #242424;
+  --border-color-strong: #333333;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
 }
 
 /* ========== 通用配置（不随主题变化） ========== */
 :root {
-  /* 间距系统 (8px 基准) */
-  --spacing-0: 0;
+  /* 间距系统 (4px 基准) */
   --spacing-1: 4px;
   --spacing-2: 8px;
   --spacing-3: 12px;
@@ -159,46 +135,33 @@
   --spacing-5: 20px;
   --spacing-6: 24px;
   --spacing-8: 32px;
-  --spacing-10: 40px;
-  --spacing-12: 48px;
-  --spacing-16: 64px;
-  
-  /* ========== 圆角 ========== */
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
-  --radius-full: 9999px;
-  
-  /* ========== 字体 ========== */
+
+  /* 圆角 - 大幅减小 */
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
+
+  /* 字体 */
   --font-family: 'Segoe UI Variable', 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  --font-size-xs: 12px;
-  --font-size-sm: 13px;
-  --font-size-base: 14px;
-  --font-size-lg: 16px;
-  --font-size-xl: 18px;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-lg: 14px;
+  --font-size-xl: 16px;
   --font-size-2xl: 20px;
-  --font-size-3xl: 24px;
-  
+
   --font-weight-normal: 400;
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
-  --font-weight-bold: 700;
-  
+
   --line-height-tight: 1.25;
-  --line-height-normal: 1.5;
-  --line-height-relaxed: 1.75;
-  
-  /* ========== 过渡动画 ========== */
-  --transition-fast: 150ms ease;
-  --transition-normal: 200ms ease;
-  --transition-slow: 300ms ease;
-  
-  /* ========== 布局 ========== */
-  --header-height: 48px;
-  --sidebar-width: 240px;
-  --content-max-width: 1200px;
-  --card-padding: var(--spacing-5);
-  --page-padding: var(--spacing-6);
+  --line-height-normal: 1.4;
+
+  /* 过渡 */
+  --transition-fast: 120ms ease;
+  --transition-normal: 180ms ease;
+
+  /* 行高 */
+  --row-height: 42px;
 }
