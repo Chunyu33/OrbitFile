@@ -6,6 +6,7 @@ import { InstalledApp } from '../types';
 import { useState, useMemo, useDeferredValue } from 'react';
 import FilterSelect from './FilterSelect';
 import EmptyState from './EmptyState';
+import { div } from 'framer-motion/client';
 
 type MigrationFilter = 'all' | 'migrated' | 'not_migrated';
 type DriveFilter = 'all' | 'c' | 'other';
@@ -447,7 +448,9 @@ export default function AppList({
             })}
           </div>
         ) : (
-          <EmptyState icon={<Search />} title="未找到匹配的应用" description="尝试调整筛选条件或搜索关键词" />
+          <div className='flex justify-center items-center w-full h-full'>
+            <EmptyState icon={<Search />} title="未找到匹配的应用" description="尝试调整筛选条件或搜索关键词" />
+          </div>
         )}
       </div>
     </div>
