@@ -137,6 +137,8 @@ pub fn run() {
             storage::history::import_history,
             storage::history::open_data_dir,
             storage::history::open_folder,
+            // 存储层 — 操作日志
+            storage::operation_log::get_operation_logs,
             // 应用管理
             get_installed_apps,
             check_process_locks,

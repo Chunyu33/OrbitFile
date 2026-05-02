@@ -3,3 +3,4 @@
 
 pub mod data_dir;
 pub mod history;
+pub mod operation_log;

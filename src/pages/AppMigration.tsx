@@ -54,6 +54,7 @@ export default function AppMigration() {
   const [cleanupTargetPublisher, setCleanupTargetPublisher] = useState<string | null>(null);
   const [leftoverItems, setLeftoverItems] = useState<LeftoverItem[]>([]);
   const [cleanupLoading, setCleanupLoading] = useState(false);
+  const [scanningResidue, setScanningResidue] = useState(false);
 
   // Toast 通知
   const { toast, showToast, hideToast } = useToast();
@@ -67,8 +68,15 @@ export default function AppMigration() {
     }
   }
 
-  // 手动触发残留扫描
+  // 手动触发残留扫描（先打开弹窗展示扫描状态，再执行扫描）
   async function handleScanResidue(app: InstalledApp) {
+    // 先打开弹窗进入扫描状态
+    setCleanupTargetAppName(app.display_name);
+    setCleanupTargetPublisher(app.publisher || null);
+    setLeftoverItems([]);
+    setScanningResidue(true);
+    setCleanupModalOpen(true);
+
     try {
       const leftovers = await invoke<LeftoverItem[]>('scan_app_residue', {
         appName: app.display_name,
@@ -76,16 +84,17 @@ export default function AppMigration() {
         installLocation: app.install_location || null,
       });
 
-      if (leftovers.length > 0) {
-        setCleanupTargetAppName(app.display_name);
-        setCleanupTargetPublisher(app.publisher || null);
-        setLeftoverItems(leftovers);
-        setCleanupModalOpen(true);
-      } else {
+      setScanningResidue(false);
+      setLeftoverItems(leftovers);
+
+      if (leftovers.length === 0) {
+        setCleanupModalOpen(false);
         showToast(`${app.display_name} 未检测到残留`, 'success');
         await handleRefresh();
       }
     } catch (error) {
+      setScanningResidue(false);
+      setCleanupModalOpen(false);
       showToast(`残留扫描失败: ${error}`, 'error');
     }
   }
@@ -154,6 +163,35 @@ export default function AppMigration() {
     }
   }
 
+  // 强制删除 + 残留扫描流程（供预览失败和卸载失败两处复用）
+  async function forceRemoveApp(app: InstalledApp, useRecycleBin: boolean) {
+    const currentUninstallKey = `${app.display_name}|${app.registry_path}`;
+    try {
+      setUninstallingKey(currentUninstallKey);
+      const result = await invoke<UninstallResult>('force_remove_application', {
+        input: { app_id: app.display_name, registry_path: app.registry_path, install_location: app.install_location, use_recycle_bin: useRecycleBin },
+      });
+      if (result.success) {
+        showToast(result.message, 'success');
+        const confirmScan = await confirm(
+          `${app.display_name} 强制删除完成。\n\n是否扫描残留文件？`,
+          { title: '扫描残留', kind: 'warning', okLabel: '开始扫描', cancelLabel: '稍后再说' }
+        );
+        if (confirmScan) {
+          await handleScanResidue(app);
+        } else {
+          await handleRefresh();
+        }
+      } else {
+        showToast(result.message || '强制删除失败', 'error');
+      }
+    } catch (error) {
+      showToast(`强制删除失败: ${error}`, 'error');
+    } finally {
+      setUninstallingKey(null);
+    }
+  }
+
   // 强力卸载流程
   async function handleUninstall(app: InstalledApp) {
     // 读取用户设置的删除方式（默认移入回收站）
@@ -189,31 +227,7 @@ export default function AppMigration() {
         { title: '强制删除', kind: 'warning', okLabel: '强制删除', cancelLabel: '取消' }
       );
       if (!forceConfirm) return;
-
-      try {
-        setUninstallingKey(currentUninstallKey);
-        const result = await invoke<UninstallResult>('force_remove_application', {
-          input: { app_id: app.display_name, registry_path: app.registry_path, install_location: app.install_location, use_recycle_bin: useRecycleBin },
-        });
-        if (result.success) {
-          showToast(result.message, 'success');
-          const confirmScan = await confirm(
-            `${app.display_name} 强制删除完成。\n\n是否扫描残留文件？`,
-            { title: '扫描残留', kind: 'warning', okLabel: '开始扫描', cancelLabel: '稍后再说' }
-          );
-          if (confirmScan) {
-            await handleScanResidue(app);
-          } else {
-            await handleRefresh();
-          }
-        } else {
-          showToast(result.message || '强制删除失败', 'error');
-        }
-      } catch (error) {
-        showToast(`强制删除失败: ${error}`, 'error');
-      } finally {
-        setUninstallingKey(null);
-      }
+      await forceRemoveApp(app, useRecycleBin);
       return;
     }
 
@@ -255,7 +269,20 @@ export default function AppMigration() {
         showToast(result.message || '启动卸载失败', 'error');
       }
     } catch (error) {
-      showToast(`卸载未完成：${error}`, 'error');
+      const errStr = String(error);
+      // 卸载命令已执行但注册表仍检测到应用（卸载向导未确认完成）
+      // 或所有卸载命令均执行失败 → 引导用户转用强制删除
+      if (errStr.includes('仍检测到应用存在') || errStr.includes('卸载命令执行失败')) {
+        const forceConfirm = await confirm(
+          `${app.display_name} 卸载未完成。\n\n${errStr}\n\n是否转用强制删除？将直接移除安装目录和注册表项。`,
+          { title: '卸载未完成', kind: 'warning', okLabel: '强制删除', cancelLabel: '取消' }
+        );
+        if (forceConfirm) {
+          await forceRemoveApp(app, useRecycleBin);
+        }
+      } else {
+        showToast(`卸载未完成：${error}`, 'error');
+      }
     } finally {
       setUninstallingKey(null);
     }
@@ -311,7 +338,7 @@ export default function AppMigration() {
 
   // 关闭清理弹窗
   function handleCloseCleanupModal() {
-    if (cleanupLoading) {
+    if (cleanupLoading || scanningResidue) {
       return;
     }
 
@@ -319,6 +346,7 @@ export default function AppMigration() {
     setLeftoverItems([]);
     setCleanupTargetAppName('');
     setCleanupTargetPublisher(null);
+    setScanningResidue(false);
   }
 
   // 核心迁移流程
@@ -617,6 +645,7 @@ export default function AppMigration() {
         appName={cleanupTargetAppName}
         items={leftoverItems}
         loading={cleanupLoading}
+        scanning={scanningResidue}
         onClose={handleCloseCleanupModal}
         onToggleItem={handleToggleLeftover}
         onConfirm={handleConfirmCleanup}

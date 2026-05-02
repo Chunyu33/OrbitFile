@@ -38,20 +38,6 @@ pub struct UninstallInput {
     pub use_recycle_bin: Option<bool>,
 }
 
-/// 删除操作的详细记录，用于日志追溯
-#[derive(Debug, Serialize)]
-pub struct DeletionRecord {
-    /// Unix 时间戳（秒）
-    pub timestamp_secs: u64,
-    pub app_name: String,
-    pub install_location: String,
-    /// "recycle_bin" 或 "permanent"
-    pub method: String,
-    pub deleted_files: bool,
-    pub deleted_registry: bool,
-    pub error: Option<String>,
-}
-
 #[cfg(windows)]
 fn sanitize_search_text(raw: &str) -> String {
     raw.chars()
@@ -382,20 +368,14 @@ pub fn force_remove_application(input: UninstallInput) -> Result<UninstallResult
         let result = execute_force_remove(&input, use_recycle)?;
         let (deleted_files, deleted_registry, install_location) = result;
 
-        // 写入删除日志（JSONL 格式，一行一条记录，可追溯）
-        let record = DeletionRecord {
-            timestamp_secs: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
-            app_name: app_name.clone(),
-            install_location: install_location.clone().unwrap_or_default(),
-            method: if use_recycle { "recycle_bin".to_string() } else { "permanent".to_string() },
-            deleted_files,
-            deleted_registry,
-            error: None,
-        };
-        write_deletion_log(&record);
+        // 写入操作日志（审计追溯）
+        crate::storage::operation_log::add_operation_log(
+            &app_name,
+            "force_remove",
+            "success",
+            &format!("强制删除完成，文件已删除:{}, 注册表已清理:{}", deleted_files, deleted_registry),
+            Some(if use_recycle { "recycle_bin" } else { "permanent" }),
+        );
 
         let parts: Vec<&str> = vec![
             if deleted_files { Some("文件已删除") } else { None },
@@ -609,6 +589,11 @@ fn validate_deletion_target(target: &Path, app_id: &str) -> Result<(), String> {
 pub async fn uninstall_application(input: UninstallInput) -> Result<UninstallResult, String> {
     #[cfg(windows)]
     {
+        let app_name = input
+            .app_id
+            .as_deref()
+            .unwrap_or("未知应用")
+            .to_string();
         let uninstall_cmds = resolve_uninstall_commands(&input)?;
         eprintln!("[orbit-file][uninstall] 候选卸载命令数量: {}", uninstall_cmds.len());
         let mut executed_cmd: Option<String> = None;
@@ -623,6 +608,14 @@ pub async fn uninstall_application(input: UninstallInput) -> Result<UninstallRes
                         eprintln!("[orbit-file][uninstall] 命令执行后仍检测到已安装，继续尝试下一条命令");
                         continue;
                     }
+
+                    crate::storage::operation_log::add_operation_log(
+                        &app_name,
+                        "uninstall",
+                        "success",
+                        &format!("卸载命令已执行: {}", uninstall_cmd),
+                        None,
+                    );
 
                     return Ok(UninstallResult {
                         success: true,
@@ -757,13 +750,26 @@ pub fn execute_cleanup(
         let success = failed_items.is_empty();
         let message = if success {
             format!("清理完成，共删除 {} 项", cleaned_count)
+        } else if cleaned_count == 0 {
+            format!(
+                "所有 {} 项清理均失败（可能需管理员权限），请以管理员身份运行后重试",
+                failed_items.len()
+            )
         } else {
             format!(
-                "清理已完成，成功 {} 项，失败 {} 项",
+                "清理部分完成：成功 {} 项，失败 {} 项（失败项可能需管理员权限）",
                 cleaned_count,
                 failed_items.len()
             )
         };
+
+        crate::storage::operation_log::add_operation_log(
+            app_name.as_deref().unwrap_or("未知应用"),
+            "cleanup",
+            if success { "success" } else { "partial_failure" },
+            &message,
+            None,
+        );
 
         Ok(CleanupResult {
             success,
@@ -1656,36 +1662,6 @@ fn is_blacklisted_path(path: &Path) -> bool {
     }
 
     false
-}
-
-/// 将删除操作记录写入 JSONL 日志文件（一行一条 JSON）
-/// 日志路径：{orbit_file_data_dir}/deletion_log.jsonl
-#[cfg(windows)]
-fn write_deletion_log(record: &DeletionRecord) {
-    let log_path = get_deletion_log_path();
-    if let Some(parent) = log_path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    if let Ok(json) = serde_json::to_string(record) {
-        if let Ok(mut file) = std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&log_path)
-        {
-            use std::io::Write;
-            let _ = writeln!(file, "{}", json);
-        }
-    }
-}
-
-/// 获取删除日志文件路径
-#[cfg(windows)]
-fn get_deletion_log_path() -> PathBuf {
-    // 优先使用 crate 的数据目录，回退到 dirs::config_dir
-    dirs::config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("orbit-file")
-        .join("deletion_log.jsonl")
 }
 
 /// 强制删除文件或目录

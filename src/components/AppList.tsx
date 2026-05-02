@@ -6,7 +6,6 @@ import { InstalledApp } from '../types';
 import { useState, useMemo, useDeferredValue } from 'react';
 import FilterSelect from './FilterSelect';
 import EmptyState from './EmptyState';
-import { div } from 'framer-motion/client';
 
 type MigrationFilter = 'all' | 'migrated' | 'not_migrated';
 type DriveFilter = 'all' | 'c' | 'other';
@@ -172,7 +171,7 @@ function AppRow({
       </span>
 
       {/* actions */}
-      <div className="flex items-center gap-1 flex-shrink-0" style={{ width: '130px', justifyContent: 'flex-end' }}>
+      <div className="flex items-center gap-1 flex-shrink-0" style={{ width: '150px', justifyContent: 'flex-end' }}>
         <button
           onClick={() => onOpenFolder(app)}
           className="btn btn-ghost btn-icon"
@@ -420,7 +419,7 @@ export default function AppList({
         <div className="flex-shrink-0 w-7" />
         <span className="flex-1 min-w-0">名称</span>
         <span className="flex-shrink-0 w-16 text-right">大小</span>
-        <span className="flex-shrink-0" style={{ width: '130px', textAlign: 'right' }}>操作</span>
+        <span className="flex-shrink-0" style={{ width: '150px', textAlign: 'right' }}>操作</span>
       </div>
 
       {/* list body */}

@@ -2,7 +2,7 @@
 // 极简风格：半透明背景 + 高对比风险操作按钮
 
 import { useMemo } from 'react';
-import { AlertTriangle, LoaderCircle, Trash2, X } from 'lucide-react';
+import { AlertTriangle, LoaderCircle, ScanSearch, Trash2, X } from 'lucide-react';
 import { LeftoverItem } from '../types';
 
 interface CleanupModalProps {
@@ -10,6 +10,7 @@ interface CleanupModalProps {
   appName: string;
   items: LeftoverItem[];
   loading: boolean;
+  scanning: boolean;
   onClose: () => void;
   onToggleItem: (path: string) => void;
   onConfirm: () => void;
@@ -26,6 +27,7 @@ export default function CleanupModal({
   appName,
   items,
   loading,
+  scanning,
   onClose,
   onToggleItem,
   onConfirm,
@@ -42,7 +44,7 @@ export default function CleanupModal({
           background: 'linear-gradient(180deg, rgba(15,23,42,0.42), rgba(2,6,23,0.62))',
           backdropFilter: 'blur(12px)',
         }}
-        onClick={loading ? undefined : onClose}
+        onClick={loading || scanning ? undefined : onClose}
       />
 
       <div
@@ -53,17 +55,21 @@ export default function CleanupModal({
           border: '1px solid var(--border-color)',
         }}
       >
-        {/* 紧凑头部 */}
+        {/* 头部 */}
         <div className="flex items-start justify-between px-5 pt-4 pb-3" style={{ borderBottom: '1px solid var(--border-color)' }}>
           <div className="pr-4 min-w-0">
-            <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>残留清理</h2>
+            <h2 className="text-base font-semibold" style={{ color: 'var(--text-primary)' }}>
+              {scanning ? '残留扫描' : '残留清理'}
+            </h2>
             <p className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
-              {appName} · 共 {items.length} 项残留，已默认全部选中
+              {scanning
+                ? `正在检测 ${appName} 的残留文件...`
+                : `${appName} · 共 ${items.length} 项残留，已默认全部选中`}
             </p>
           </div>
           <button
             onClick={onClose}
-            disabled={loading}
+            disabled={loading || scanning}
             className="btn btn-ghost btn-icon flex-shrink-0"
             aria-label="关闭弹窗"
           >
@@ -71,9 +77,21 @@ export default function CleanupModal({
           </button>
         </div>
 
-        {/* 可滚动残留列表 */}
+        {/* 体部 */}
         <div className="overflow-y-auto px-5 py-3" style={{ maxHeight: 'min(360px, 50vh)' }}>
-          {items.length === 0 ? (
+          {scanning ? (
+            <div className="py-12 flex flex-col items-center justify-center gap-4">
+              <ScanSearch className="w-8 h-8 animate-pulse" style={{ color: 'var(--color-primary)' }} />
+              <div className="text-center">
+                <p className="text-[13px] font-medium" style={{ color: 'var(--text-secondary)' }}>
+                  正在扫描残留文件...
+                </p>
+                <p className="text-[11px] mt-1" style={{ color: 'var(--text-tertiary)' }}>
+                  检测 AppData / LocalAppData / ProgramData 及注册表
+                </p>
+              </div>
+            </div>
+          ) : items.length === 0 ? (
             <div className="py-10 text-center">
               <p style={{ color: 'var(--text-tertiary)', fontSize: 'var(--font-size-sm)' }}>未发现可清理残留</p>
             </div>
@@ -121,53 +139,59 @@ export default function CleanupModal({
         </div>
 
         {/* 底部操作栏 */}
-        <div
-          className="flex items-center justify-between px-5 py-3"
-          style={{
-            borderTop: '1px solid var(--border-color)',
-            background: 'color-mix(in srgb, var(--color-gray-50) 74%, transparent)',
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
-              已选 {selectedCount}/{items.length}
-            </span>
-            <span
-              className="cursor-pointer"
-              style={{ color: 'var(--color-warning)', fontSize: 'var(--font-size-xs)' }}
-              title="删除后不可恢复"
-            >
-              <AlertTriangle className="w-3 h-3 inline" />
-            </span>
-          </div>
-          <div className="flex items-center" style={{ gap: 'var(--spacing-2)' }}>
-            <button className="btn btn-sm" onClick={onClose} disabled={loading}>
-              取消
-            </button>
-            <button
-              onClick={onConfirm}
-              disabled={loading || selectedCount === 0}
-              className="btn btn-sm"
-              style={{
-                background: 'var(--color-danger)',
-                color: 'var(--text-inverse)',
-                borderColor: 'var(--color-danger)',
-              }}
-            >
-              {loading ? (
-                <>
-                  <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
-                  清理中...
-                </>
-              ) : (
-                <>
-                  <Trash2 className="w-3.5 h-3.5" />
-                  确认清理
-                </>
+        {!scanning && (
+          <div
+            className="flex items-center justify-between px-5 py-3"
+            style={{
+              borderTop: '1px solid var(--border-color)',
+              background: 'color-mix(in srgb, var(--color-gray-50) 74%, transparent)',
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <span style={{ color: 'var(--text-secondary)', fontSize: 'var(--font-size-sm)' }}>
+                已选 {selectedCount}/{items.length}
+              </span>
+              {items.length > 0 && (
+                <span
+                  className="cursor-pointer"
+                  style={{ color: 'var(--color-warning)', fontSize: 'var(--font-size-xs)' }}
+                  title="删除后不可恢复"
+                >
+                  <AlertTriangle className="w-3 h-3 inline" />
+                </span>
               )}
-            </button>
+            </div>
+            <div className="flex items-center" style={{ gap: 'var(--spacing-2)' }}>
+              <button className="btn btn-sm" onClick={onClose} disabled={loading}>
+                {items.length === 0 ? '关闭' : '取消'}
+              </button>
+              {items.length > 0 && (
+                <button
+                  onClick={onConfirm}
+                  disabled={loading || selectedCount === 0}
+                  className="btn btn-sm"
+                  style={{
+                    background: 'var(--color-danger)',
+                    color: 'var(--text-inverse)',
+                    borderColor: 'var(--color-danger)',
+                  }}
+                >
+                  {loading ? (
+                    <>
+                      <LoaderCircle className="w-3.5 h-3.5 animate-spin" />
+                      清理中...
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 className="w-3.5 h-3.5" />
+                      确认清理
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
