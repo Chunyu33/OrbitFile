@@ -8,16 +8,7 @@ macro_rules! orbit_log {
     };
 }
 
-// 便捷宏
-macro_rules! log_info {
-    ($module:expr, $($arg:tt)*) => { orbit_log!("INFO", $module, $($arg)*) };
-}
 macro_rules! log_warn {
     ($module:expr, $($arg:tt)*) => { orbit_log!("WARN", $module, $($arg)*) };
 }
-macro_rules! log_error {
-    ($module:expr, $($arg:tt)*) => { orbit_log!("ERROR", $module, $($arg)*) };
-}
-
-// 按需 use：需要时在调用处添加对应宏名即可
 

@@ -7,7 +7,7 @@ use fs_extra::dir::get_size;
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
-use crate::MigrationResult;
+use crate::models::MigrationResult;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 

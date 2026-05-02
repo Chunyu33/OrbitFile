@@ -12,7 +12,7 @@ use sysinfo::Disks;
 use tauri::Emitter;
 use walkdir::WalkDir;
 
-use crate::{MigrationRecordType, MigrationResult};
+use crate::models::{MigrationRecordType, MigrationResult};
 
 #[cfg(windows)]
 use std::os::windows::fs::symlink_dir;
@@ -275,7 +275,7 @@ pub fn migrate_app(
                 }
 
                 // 步骤 7: 写入迁移历史
-                if let Err(e) = crate::add_migration_record(
+                if let Err(e) = crate::storage::history::add_migration_record(
                     &app_name,
                     &source,
                     &target_path_str,

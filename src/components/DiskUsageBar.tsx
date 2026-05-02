@@ -148,8 +148,8 @@ export default function DiskUsageBar({ disks, loading, refreshing = false, onRef
   }, [disks]);
 
   const summaryText = useMemo(() => {
-    if (loading) return '磁盘加载中';
-    if (!primaryDisk) return '无磁盘数据';
+    if (loading) return '加载中';
+    if (!primaryDisk) return '无数据';
     const name = getDisplayName(primaryDisk.mount_point);
     return `${name}: ${primaryDisk.usage_percent.toFixed(0)}%`;
   }, [loading, primaryDisk]);

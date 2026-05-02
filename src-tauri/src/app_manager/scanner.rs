@@ -14,7 +14,7 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use crate::{InstalledApp, ProcessLockResult};
+use crate::models::{InstalledApp, ProcessLockResult};
 use sysinfo::System;
 #[cfg(windows)]
 use walkdir::WalkDir;
@@ -530,7 +530,7 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
                         for app in chunk {
                             if !app.display_icon.is_empty() {
                                 app.icon_base64 =
-                                    crate::extract_icon_to_base64(&app.display_icon);
+                                    crate::system::icon::extract_icon_to_base64(&app.display_icon);
                             }
                             // 注册表 EstimatedSize 大多为空（显示"未知"），
                             // 在此并行计算安装目录的实际体积
