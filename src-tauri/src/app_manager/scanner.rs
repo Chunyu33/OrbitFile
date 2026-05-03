@@ -151,19 +151,6 @@ fn is_skippable_dir(name: &str) -> bool {
     is_dev_directory(name) || is_bundled_runtime_dir(name)
 }
 
-/// 判断目录名是否为“绝对不可能是应用标识”的结构性名称
-/// 这些目录本身绝不能被注册为应用，即使在内部找到了 exe
-/// ——必须向上重定向到父目录，找不到有效父目录则丢弃
-#[cfg(windows)]
-fn is_never_app_dir(name: &str) -> bool {
-    const NEVER_APP: &[&str] = &[
-        "bin", "lib", "libs", "include",
-        "sdk", "tools", "runtime", "runtimes",
-    ];
-    let lower = name.to_lowercase();
-    NEVER_APP.iter().any(|n| &lower == n)
-}
-
 /// 判断子目录名是否为应用的支撑目录（resources、locales 等）
 /// 用于旁证：当前目录是一个完整应用而非仅有裸 exe 的文件堆放处
 #[cfg(windows)]
@@ -178,130 +165,28 @@ fn is_supporting_subdir(name: &str) -> bool {
     SUPPORT_DIRS.iter().any(|d| &lower == d)
 }
 
-/// 向下一层子目录搜索匹配父目录名的 exe
-/// 用于处理 exe 在 bin/app/x64 等结构性子目录中的应用：
-///   E:\app\SomeApp\bin\SomeApp.exe  → 返回 SomeApp.exe
-/// 仅在顶层有支撑证据（DLL/配置/支撑子目录）时才调用
-#[cfg(windows)]
-fn find_deep_exe_matching_parent(dir: &Path, parent_name_lower: &str) -> Option<PathBuf> {
-    // 优先探查 bin/（最常见的主 exe 位置），再探查其他结构性子目录
-    let bin_dir = dir.join("bin");
-    if bin_dir.exists() {
-        if let Some(exe) = try_find_exe_in_dir(&bin_dir, parent_name_lower) {
-            return Some(exe);
-        }
-    }
-
-    let entries = std::fs::read_dir(dir).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
-        }
-        let sub_name = path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .unwrap_or("");
-        // 跳过 bin（已优先检查）和非结构性目录
-        if sub_name.eq_ignore_ascii_case("bin") || !is_structural_or_support_dir(sub_name) {
-            continue;
-        }
-        if let Some(exe) = try_find_exe_in_dir(&path, parent_name_lower) {
-            return Some(exe);
-        }
-    }
-    None
-}
-
-/// 在指定目录中查找匹配父目录名的 exe
-#[cfg(windows)]
-fn try_find_exe_in_dir(sub_dir: &Path, parent_name_lower: &str) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(sub_dir).ok()?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
-        }
-        let ext = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
-        if !ext.eq_ignore_ascii_case("exe") {
-            continue;
-        }
-        let file_name_lower = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        if is_installer_like_exe(&file_name_lower) {
-            continue;
-        }
-        let stem = path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        if stem == *parent_name_lower || parent_name_lower.contains(&stem) {
-            return Some(path);
-        }
-    }
-    None
-}
-
-/// 当 exe 在结构性子目录（bin/app/x64 等）中被发现时，
-/// 尝试向上查找真正的应用根目录
-/// 必要条件：exe 名与父目录名匹配
-/// 找不到有效父目录时返回 None —— 调用方必须丢弃此候选，绝不回退到结构子目录自身
-#[cfg(windows)]
-fn resolve_app_root_from_structural(dir: &Path, exe_path: &Path) -> Option<PathBuf> {
-    let exe_stem = exe_path
-        .file_stem()
-        .map(|s| s.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    let mut current = dir.to_path_buf();
-    while let Some(parent) = current.parent() {
-        // 到达磁盘根（如 E:\）则停止
-        if parent.parent().is_none() {
-            break;
-        }
-        let parent_name = parent
-            .file_name()
-            .and_then(|n| n.to_str())
-            .map(|n| n.to_lowercase())
-            .unwrap_or_default();
-        if parent_name.is_empty() {
-            break;
-        }
-        // 父目录仍是结构性名称 → 继续向上
-        if is_structural_or_support_dir(&parent_name) {
-            current = parent.to_path_buf();
-            continue;
-        }
-        // 非结构性父目录：检查 exe 名是否与父目录名匹配
-        if exe_stem == parent_name || parent_name.contains(&exe_stem) || exe_stem.contains(&parent_name) {
-            return Some(parent.to_path_buf());
-        }
-        // exe 名不匹配 → 父目录不是此应用的正确标识，放弃
-        break;
-    }
-    // 没有找到有效的父目录 → 丢弃（外部会继续向下扫描）
-    None
-}
-
-/// 判断目录名是否为结构性/支撑性名称（bin、app、x64 等）
-/// 这些目录本身不是应用，而是应用的内部结构
-#[cfg(windows)]
-fn is_structural_or_support_dir(name: &str) -> bool {
-    is_supporting_subdir(name)
-        || is_never_app_dir(name) // bin/lib/tools 等也属于结构性目录
-        || {
-            const STRUCTURAL: &[&str] = &[
-                "app", "application", "program",
-                "x64", "x86", "win64", "win32", "ia32",
-                "portable", "standalone",
-            ];
-            let lower = name.to_lowercase();
-            STRUCTURAL.iter().any(|s| &lower == s)
-        }
+/// 应用候选：扫描过程中发现的每个 exe 都作为一个独立候选
+/// exe 驱动模型的核心数据结构——不再依赖目录结构判断
+#[allow(dead_code)]
+struct ApplicationCandidate {
+    /// exe 文件路径
+    exe_path: PathBuf,
+    /// exe 所在目录（即应用根目录）
+    dir_path: PathBuf,
+    /// exe 文件名（不含扩展名）
+    exe_name: String,
+    /// 同目录含 DLL 旁证（由 directory_looks_like_app 回填）
+    has_dll: bool,
+    /// 同目录含配置文件旁证（由 directory_looks_like_app 回填）
+    has_config: bool,
+    /// 同目录含支撑子目录旁证（由 directory_looks_like_app 回填）
+    has_supporting_subdirs: bool,
+    /// 目录中 exe 总数（由 directory_looks_like_app 回填）
+    exe_count: u32,
+    /// exe 本身是否为安装包/卸载器类型
+    is_installer_like: bool,
+    /// exe 是否位于下载目录
+    in_downloads: bool,
 }
 
 /// exe 名与目录名的匹配程度
@@ -400,22 +285,17 @@ fn score_application_candidate(
     score
 }
 
-/// 判断目录是否"看起来像一个应用目录"
+/// exe 驱动的应用识别：扫描目录，对每个 exe 独立评分，选取最佳候选
+///
 /// 两阶段模型：
+/// 阶段1（宽松识别）：只要目录中存在 exe/bat/cmd 且非纯安装包目录 → 即为候选
+/// 阶段2（轻量评分）：按多信号融合评分，score >= 0.35 即可返回，评分同时决定最佳主 exe
 ///
-/// 阶段1（宽松识别）：
-/// - 只要目录中有 exe / bat / cmd
-/// - 且不是"纯安装包目录"（只有 installer exe + 无 dll/config/子目录）
-/// → 即可作为候选应用
-///
-/// 阶段2（轻量评分）：
-/// - 对所有 exe 候选评分，选取最高分
-/// - score >= 0.35 即可返回
-/// - 评分同时用于选择最佳主 exe
+/// 核心原则：exe 在哪里，就以 exe 所在目录为应用根——不再向上"猜"父目录
 #[cfg(windows)]
 fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
     let entries = std::fs::read_dir(dir).ok()?;
-    let mut exe_candidates: Vec<PathBuf> = Vec::new();
+    let mut candidates: Vec<ApplicationCandidate> = Vec::new();
     let mut best_launcher: Option<PathBuf> = None;
     let mut has_non_installer_exe = false;
     let mut has_dll = false;
@@ -427,9 +307,9 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
         .map(|n| n.to_string_lossy().to_lowercase())
         .unwrap_or_default();
 
+    // 扫描目录：收集 exe 候选 + 环境信号
     for entry in entries.flatten() {
         let path = entry.path();
-
         if path.is_dir() {
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                 if is_supporting_subdir(name) {
@@ -438,7 +318,6 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
             }
             continue;
         }
-
         if !path.is_file() {
             continue;
         }
@@ -450,12 +329,36 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
             match ext.to_lowercase().as_str() {
                 "exe" => {
                     exe_count += 1;
-                    // 阶段1 宽松策略：安装包/卸载器 exe 也纳入候选（不再硬跳过）
-                    // 评分函数中的 -0.15 惩罚足以区分优先级
-                    if !is_installer_like_exe(&file_name_lower) {
+                    let is_installer = is_installer_like_exe(&file_name_lower);
+                    if !is_installer {
                         has_non_installer_exe = true;
                     }
-                    exe_candidates.push(path);
+                    let exe_name = path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string())
+                        .unwrap_or_default();
+                    // 跳过无意义文件名（如 a.exe、1.exe）
+                    if exe_name.len() <= 1 {
+                        continue;
+                    }
+                    let exe_lower = path.to_string_lossy().to_lowercase();
+                    let in_downloads = (*DOWNLOADS_DIR_LOWER)
+                        .as_ref()
+                        .map(|dl| exe_lower.starts_with(dl.as_str()))
+                        .unwrap_or(false);
+                    candidates.push(ApplicationCandidate {
+                        exe_path: path.clone(),
+                        dir_path: dir.to_path_buf(),
+                        exe_name,
+                        has_dll: false,
+                        has_config: false,
+                        has_supporting_subdirs: false,
+                        exe_count: 0,
+                        is_installer_like: is_installer,
+                        in_downloads,
+                    });
                 }
                 "dll" => has_dll = true,
                 "bat" | "cmd" => {
@@ -471,8 +374,7 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
         }
     }
 
-    // 阶段1 纯安装包目录检查：
-    // 只有 installer exe，且无 bat/cmd、无 dll、无 config、无支撑子目录 → 判定为安装包目录
+    // 阶段1：纯安装包目录过滤（只有 installer exe + 无任何旁证）
     let is_pure_installer_dir = !has_non_installer_exe
         && best_launcher.is_none()
         && !has_dll
@@ -490,20 +392,39 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
         return None;
     }
 
-    // 阶段2：对所有 exe 候选评分，取最高分
+    // 排除下载/临时目录中无旁证的 exe（大概率是未安装的安装包）
+    let in_transient_dir = dir_name_lower == "download"
+        || dir_name_lower == "downloads"
+        || dir_name_lower == "temp"
+        || dir_name_lower == "tmp";
+    if in_transient_dir && !has_dll && !has_config && !has_supporting_subdirs {
+        orbit_log!(
+            "DEBUG", "scanner",
+            "filtered: transient_dir dir={} (no supporting evidence for portable app)",
+            dir.display()
+        );
+        return None;
+    }
+
+    // 回填共享信号到每个候选（同一目录的信号对所有 exe 相同）
+    for c in &mut candidates {
+        c.has_dll = has_dll;
+        c.has_config = has_config;
+        c.has_supporting_subdirs = has_supporting_subdirs;
+        c.exe_count = exe_count;
+    }
+
+    // 阶段2：对每个 exe 候选独立评分，选取最高分
     let mut best_exe: Option<PathBuf> = None;
     let mut best_score: f32 = 0.0;
 
-    for exe_path in &exe_candidates {
-        let stem = exe_path
-            .file_stem()
-            .map(|s| s.to_string_lossy().to_lowercase())
-            .unwrap_or_default();
-        let name_match = if stem == dir_name_lower {
+    for c in &candidates {
+        let exe_name_lower = c.exe_name.to_lowercase();
+        let name_match = if exe_name_lower == dir_name_lower {
             NameMatchKind::Exact
-        } else if !stem.is_empty()
+        } else if !exe_name_lower.is_empty()
             && !dir_name_lower.is_empty()
-            && (dir_name_lower.contains(&stem) || stem.contains(&dir_name_lower))
+            && (dir_name_lower.contains(&exe_name_lower) || exe_name_lower.contains(&dir_name_lower))
         {
             NameMatchKind::Contains
         } else {
@@ -511,43 +432,43 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
         };
 
         let score = score_application_candidate(
-            exe_path,
-            has_dll,
-            has_config,
-            has_supporting_subdirs,
-            exe_count,
+            &c.exe_path,
+            c.has_dll,
+            c.has_config,
+            c.has_supporting_subdirs,
+            c.exe_count,
             name_match,
         );
 
         if score > best_score {
             best_score = score;
-            best_exe = Some(exe_path.clone());
+            best_exe = Some(c.exe_path.clone());
         }
     }
 
     if best_score >= SCORE_THRESHOLD {
+        orbit_log!(
+            "DEBUG", "scanner",
+            "found: dir={} score={:.2} threshold={:.2}",
+            dir.display(),
+            best_score,
+            SCORE_THRESHOLD
+        );
         return best_exe;
     }
 
-    // 阶段2 未达阈值但有支撑证据 → 向深层搜索名称匹配 exe
-    if has_dll || has_config || has_supporting_subdirs {
-        if let Some(exe) = find_deep_exe_matching_parent(dir, &dir_name_lower) {
-            return Some(exe);
-        }
-    }
+    // .bat / .cmd / .ps1 不是标准应用程序，不再作为回退候选
 
-    // bat/cmd 宽松回退：只要存在即可返回（纯安装包目录已在阶段1排除）
-    if let Some(p) = best_launcher {
-        return Some(p);
+    if !candidates.is_empty() {
+        orbit_log!(
+            "DEBUG", "scanner",
+            "filtered: low_score dir={} best_score={:.2} threshold={:.2} candidates={}",
+            dir.display(),
+            best_score,
+            SCORE_THRESHOLD,
+            candidates.len()
+        );
     }
-
-    orbit_log!(
-        "DEBUG", "scanner",
-        "filtered: low_score dir={} best_score={:.2} threshold={:.2}",
-        dir.display(),
-        best_score,
-        SCORE_THRESHOLD
-    );
     None
 }
 
@@ -557,19 +478,14 @@ lazy_static::lazy_static! {
         dirs::download_dir().map(|p| p.to_string_lossy().to_lowercase());
 }
 
-/// 路径是否属于应当跳过的系统/空/下载目录
+/// 路径是否属于应当跳过的系统目录（仅限核心 Windows 系统目录）
+/// 不再屏蔽 ProgramData / Downloads / Tencent 等——交给评分模型处理
 #[cfg(windows)]
 fn is_blacklisted_path(path: &Path) -> bool {
-    let lower = path.to_string_lossy().to_lowercase();
     const BLACKLIST: &[&str] = &[
         "windows",
         "$recycle.bin",
         "system volume information",
-        "programdata",
-        "recovery",
-        "perflogs",
-        "msocache",
-        "config.msi",
     ];
     if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
         let nl = name.to_lowercase();
@@ -577,19 +493,8 @@ fn is_blacklisted_path(path: &Path) -> bool {
             return true;
         }
     }
-    // 跳过下载目录（含用户自定义映射后的路径），避免安装包被误识别为应用
-    if let Some(ref downloads_lower) = *DOWNLOADS_DIR_LOWER {
-        if lower == *downloads_lower {
-            return true;
-        }
-        // 仅当路径是下载目录的子路径时才拒绝（要求路径分隔符紧随其后）
-        if let Some(rest) = lower.strip_prefix(downloads_lower.as_str()) {
-            if rest.starts_with('\\') {
-                return true;
-            }
-        }
-    }
-    // Windows.old 等衍生命名
+    // Windows.old 仍然跳过
+    let lower = path.to_string_lossy().to_lowercase();
     lower.ends_with("\\windows.old")
 }
 
@@ -616,32 +521,16 @@ fn scan_directory_recursive(
         if is_skippable_dir(name) {
             return;
         }
-    }
-
-    // 当前目录像应用 → 记录后终止向下递归
-    if let Some(exe_path) = directory_looks_like_app(dir) {
-        if let Some(name) = dir.file_name().and_then(|n| n.to_str()) {
-            if is_structural_or_support_dir(name) {
-                // 结构性子目录（bin/lib/tools 等）：优先向上重定向到真正的应用根
-                if let Some(app_dir) = resolve_app_root_from_structural(dir, &exe_path) {
-                    maybe_push_app(&app_dir, &exe_path, existing_paths, seen, out);
-                    return;
-                }
-                // resolve 失败 → 宽松策略：仍允许当前目录作为应用注册，不丢弃
-                orbit_log!(
-                    "DEBUG", "scanner",
-                    "structural dir '{}' resolve failed, registering as-is (exe={})",
-                    name,
-                    exe_path.display()
-                );
-            }
-            // 非结构性目录 或 结构性目录 resolve 失败 → 直接注册
-            maybe_push_app(dir, &exe_path, existing_paths, seen, out);
-            return;
-        } else {
-            maybe_push_app(dir, &exe_path, existing_paths, seen, out);
+        // 系统隐藏的安装信息目录（如 InstallShield Installation Information）
+        if name.eq_ignore_ascii_case("InstallShield Installation Information") {
             return;
         }
+    }
+
+    // exe 驱动：目录中有应用候选 → 以 exe 所在目录为应用根注册，终止向下递归
+    if let Some(exe_path) = directory_looks_like_app(dir) {
+        maybe_push_app(dir, &exe_path, existing_paths, seen, out);
+        return;
     }
 
     // 递归进入子目录
@@ -671,6 +560,7 @@ fn scan_directory_recursive(
 }
 
 /// 将候选目录作为应用加入结果集（含去重与基础信息填充）
+/// 去重主键：exe_path（同一 exe 不重复）+ install_location（同目录不重复）
 #[cfg(windows)]
 fn maybe_push_app(
     dir: &Path,
@@ -680,13 +570,19 @@ fn maybe_push_app(
     out: &mut Vec<InstalledApp>,
 ) {
     let install_location = dir.to_string_lossy().to_string();
-    let key = normalize_path(&install_location);
-    if key.is_empty() || existing_paths.contains(&key) || seen.contains(&key) {
+    let loc_key = normalize_path(&install_location);
+    // exe_path 作为主去重键，install_location 作为辅助
+    let exe_key = normalize_path(&exe_path.to_string_lossy());
+    if loc_key.is_empty()
+        || exe_key.is_empty()
+        || existing_paths.contains(&loc_key)
+        || seen.contains(&loc_key)
+        || seen.contains(&exe_key)
+    {
         return;
     }
 
     // display_name 优先使用 exe 的文件名（无扩展名），其次用目录名
-    // 目录名"bin"、"lib"等是无意义的，exe stem 才是应用的真实标识
     let display_name = exe_path
         .file_stem()
         .and_then(|s| s.to_str())
@@ -699,20 +595,21 @@ fn maybe_push_app(
                 .to_string()
         });
 
-    // 最终安全检查：display_name 不能是结构性无意义的名称
-    if display_name.is_empty() || is_never_app_dir(&display_name.to_lowercase()) {
+    if display_name.is_empty() {
         return;
     }
 
-    seen.insert(key);
+    // 同时记录 install_location 和 exe_path，防止重复
+    seen.insert(loc_key);
+    seen.insert(exe_key);
 
     out.push(InstalledApp {
         display_name,
         install_location,
         display_icon: exe_path.to_string_lossy().to_string(),
-        estimated_size: 0, // 文件系统扫描不立即计算体积，避免阻塞
+        estimated_size: 0,
         icon_base64: String::new(),
-        registry_path: String::new(), // 便携应用无注册表条目
+        registry_path: String::new(),
         publisher: String::new(),
     });
 }
@@ -755,41 +652,45 @@ fn dedup_subdirectory_apps(apps: &mut Vec<InstalledApp>) {
 }
 
 /// 汇总所有需要扫描的文件系统根目录
+/// 返回 (program_files_roots, local_app_data_roots, deep_roots)
 #[cfg(windows)]
-fn collect_filesystem_roots() -> (Vec<PathBuf>, Vec<PathBuf>) {
-    let mut shallow_roots: Vec<PathBuf> = Vec::new();
+fn collect_filesystem_roots() -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>) {
+    // Program Files 系：深度 2（已安装应用通常在第一层子目录）
+    let mut pf_roots: Vec<PathBuf> = Vec::new();
     if let Some(pf) = std::env::var_os("ProgramFiles") {
-        shallow_roots.push(PathBuf::from(pf));
+        pf_roots.push(PathBuf::from(pf));
     }
     if let Some(pf86) = std::env::var_os("ProgramFiles(x86)") {
-        shallow_roots.push(PathBuf::from(pf86));
-    }
-    if let Some(la) = std::env::var_os("LocalAppData") {
-        let local_app_data = PathBuf::from(la);
-        // Squirrel 安装器（Electron 应用常用）将应用安装到 %LOCALAPPDATA%\<appname>
-        // 例如 MarkText → C:\Users\<user>\AppData\Local\marktext
-        shallow_roots.push(local_app_data.clone());
-        // Windows Store / ClickOnce 应用可能安装在 Programs 子目录下
-        let programs = local_app_data.join("Programs");
-        if programs.exists() {
-            shallow_roots.push(programs);
-        }
+        pf_roots.push(PathBuf::from(pf86));
     }
 
-    // 非系统固定盘（通过 sysinfo 获取），以及 C 盘常见便携根（只走二级扫描）
+    // LocalAppData / ProgramData 系：深度 3~4（Electron/Squirrel 安装深度不定）
+    let mut lad_roots: Vec<PathBuf> = Vec::new();
+    if let Some(la) = std::env::var_os("LocalAppData") {
+        let local_app_data = PathBuf::from(la);
+        lad_roots.push(local_app_data.clone());
+        let programs = local_app_data.join("Programs");
+        if programs.exists() {
+            lad_roots.push(programs);
+        }
+    }
+    if let Some(pd) = std::env::var_os("ProgramData") {
+        lad_roots.push(PathBuf::from(pd));
+    }
+
+    // 非系统盘：深度 4（便携应用嵌套深，如 E:\app\other\Snipaste-x64）
     let mut deep_roots: Vec<PathBuf> = Vec::new();
     let disks = sysinfo::Disks::new_with_refreshed_list();
     for disk in &disks {
         let mount = disk.mount_point();
         let mount_str = mount.to_string_lossy().to_uppercase();
-        // 跳过系统盘，避免扫描 C:\ 顶层过多系统目录
         if mount_str.starts_with("C:") {
             continue;
         }
         deep_roots.push(mount.to_path_buf());
     }
 
-    (shallow_roots, deep_roots)
+    (pf_roots, lad_roots, deep_roots)
 }
 
 /// 获取已安装应用列表
@@ -881,8 +782,10 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
                             continue;
                         }
 
-                        // 幽灵条目过滤 2：DisplayIcon 指向的 exe 已不存在
-                        // 卸载器执行后主程序已被删除，但注册表键残留（Squirrel/Electron 应用常见）
+                        // DisplayIcon 指向的 exe 已不存在 → 降权保留，不删除应用
+                        // 卸载器执行后主程序已被删除但注册表键残留（Squirrel/Electron 应用常见）
+                        // 保留应用记录以防漏报，仅清空图标路径
+                        let mut effective_icon = display_icon.clone();
                         if !display_icon.is_empty() {
                             let icon_file = display_icon
                                 .split(',')
@@ -891,7 +794,12 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
                                 .trim()
                                 .trim_matches('"');
                             if !icon_file.is_empty() && !Path::new(icon_file).exists() {
-                                continue;
+                                effective_icon.clear();
+                                orbit_log!(
+                                    "DEBUG", "scanner",
+                                    "DisplayIcon missing for '{}', keeping app without icon",
+                                    display_name
+                                );
                             }
                         }
 
@@ -909,7 +817,7 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
                         apps.push(InstalledApp {
                             display_name,
                             install_location,
-                            display_icon,
+                            display_icon: effective_icon,
                             estimated_size,
                             icon_base64: String::new(),
                             registry_path: app_registry_path,
@@ -926,16 +834,20 @@ pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
             .map(|a| normalize_path(&a.install_location))
             .collect();
         let mut seen: HashSet<String> = HashSet::new();
-        let (shallow_roots, deep_roots) = collect_filesystem_roots();
-        // C 盘已知安装目录: 浅扫（max_depth=1，即根 + 一层子目录）
-        for root in &shallow_roots {
-            scan_directory_recursive(root, 0, 1, &existing_paths, &mut seen, &mut apps);
+        let (pf_roots, lad_roots, deep_roots) = collect_filesystem_roots();
+        // Program Files 系：深度 2（已安装应用通常在根或一层子目录内）
+        for root in &pf_roots {
+            scan_directory_recursive(root, 0, 2, &existing_paths, &mut seen, &mut apps);
+        }
+        // LocalAppData / ProgramData 系：深度 3（Electron/Squirrel/国产应用可能嵌套较深）
+        for root in &lad_roots {
+            scan_directory_recursive(root, 0, 3, &existing_paths, &mut seen, &mut apps);
         }
         // 跨 root 去重：防止 D 盘、E 盘扫描到相同路径
         existing_paths.extend(seen.iter().cloned());
-        // 非 C 盘根目录：深扫（max_depth=3），覆盖 E:\app\other\Snipaste-x64 等深层便携应用
+        // 非系统盘根目录：深度 4（便携应用如 E:\app\other\Snipaste-x64 可能深度嵌套）
         for root in &deep_roots {
-            scan_directory_recursive(root, 0, 3, &existing_paths, &mut seen, &mut apps);
+            scan_directory_recursive(root, 0, 4, &existing_paths, &mut seen, &mut apps);
         }
 
         // 去重：同名应用中移除子目录里的重复条目
