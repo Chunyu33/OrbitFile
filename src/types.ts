@@ -15,7 +15,10 @@ export interface InstalledApp {
   estimated_size: number;
   // 应用图标的 Base64 编码数据（PNG 格式）
   // 如果提取失败则为空字符串
+  // @deprecated 迁移至 icon_url 自定义协议
   icon_base64: string;
+  // 图标自定义协议 URL（如 "orbit://icon.C:/Program Files/App/app.exe"）
+  icon_url: string;
   // 应用对应注册表路径（用于强力卸载）
   registry_path: string;
   // 发布商（用于强力卸载残留匹配）

@@ -38,7 +38,11 @@ pub struct InstalledApp {
     /// 预估大小（KB）
     pub estimated_size: u64,
     /// 应用图标的 Base64 编码数据（PNG 格式），提取失败则为空字符串
+    /// @deprecated 迁移至 icon_url 自定义协议，保留以兼容前端旧版本
     pub icon_base64: String,
+    /// 图标自定义协议 URL（如 "orbit://icon.C:/Program Files/App/app.exe"）
+    /// 前端优先使用此字段渲染图标，回退到 icon_base64
+    pub icon_url: String,
     /// 应用对应注册表路径（用于后续卸载）
     pub registry_path: String,
     /// 发布商（用于强力卸载残留匹配）

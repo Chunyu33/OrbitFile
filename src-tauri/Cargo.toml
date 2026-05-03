@@ -42,6 +42,8 @@ dirs = "5.0"
 walkdir = "2.5"
 # 回收站支持（跨平台），避免误删无法恢复
 trash = "5"
+# 并行迭代器，用于注册表扫描、文件系统扫描并行化
+rayon = "1.10"
 
 # Windows API 绑定，用于提取应用图标
 [target.'cfg(windows)'.dependencies]

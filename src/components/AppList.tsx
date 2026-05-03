@@ -45,6 +45,7 @@ function formatSize(kb: number): string {
 }
 
 function AppIcon({ app }: { app: InstalledApp }) {
+  // icon_base64 是当前稳定方案，icon_url 预留后续自定义协议迁移
   if (app.icon_base64) {
     return (
       <div

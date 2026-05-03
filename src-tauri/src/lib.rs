@@ -30,6 +30,11 @@ fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
 }
 
 #[tauri::command]
+fn get_app_size(install_location: String) -> Result<u64, String> {
+    app_manager::scanner::get_app_size(install_location)
+}
+
+#[tauri::command]
 fn check_process_locks(source_path: String) -> Result<ProcessLockResult, String> {
     app_manager::scanner::check_process_locks(source_path)
 }
@@ -141,6 +146,7 @@ pub fn run() {
             storage::operation_log::get_operation_logs,
             // 应用管理
             get_installed_apps,
+            get_app_size,
             check_process_locks,
             migrate_app,
             migrate_special_folder,

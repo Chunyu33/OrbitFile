@@ -2789,6 +2789,7 @@ dependencies = [
  "fs_extra",
  "image",
  "lazy_static",
+ "rayon",
  "serde",
  "serde_json",
  "sysinfo",

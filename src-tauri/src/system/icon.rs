@@ -215,6 +215,32 @@ pub fn extract_icon_to_base64(icon_path: &str) -> String {
     }
 }
 
+/// 从 EXE/DLL 文件中提取图标的原始 PNG 字节（供自定义协议使用）
+///
+/// 与 extract_icon_to_base64 不同，此函数返回原始 PNG 字节，
+/// 避免 Base64 编解码开销，直接用于 Tauri custom protocol 响应。
+///
+/// # 返回
+/// - 成功时返回 PNG 字节数据
+/// - 失败时返回空 Vec
+/// 从 exe 提取图标 PNG 原始字节（供自定义协议使用，预留）
+#[cfg(windows)]
+#[allow(dead_code)]
+pub fn extract_icon_png_bytes(icon_path: &str) -> Vec<u8> {
+    let base64_str = extract_icon_to_base64(icon_path);
+    if base64_str.is_empty() {
+        return Vec::new();
+    }
+    // 去掉 "data:image/png;base64," 前缀
+    let b64_body = base64_str.strip_prefix("data:image/png;base64,").unwrap_or(&base64_str);
+    BASE64_STANDARD.decode(b64_body).unwrap_or_default()
+}
+
+#[cfg(not(windows))]
+pub fn extract_icon_png_bytes(_icon_path: &str) -> Vec<u8> {
+    Vec::new()
+}
+
 /// 非 Windows 平台的图标提取占位函数
 #[cfg(not(windows))]
 pub fn extract_icon_to_base64(_icon_path: &str) -> String {
