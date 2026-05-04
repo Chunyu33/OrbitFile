@@ -2,7 +2,7 @@
 // 实现完整的迁移流程：目录选择 -> 进程检测 -> 文件复制 -> 创建链接
 // 支持真实进度上报和取消操作
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { confirm, open } from '@tauri-apps/plugin-dialog';
@@ -28,7 +28,10 @@ export default function AppMigration() {
   const [apps, setApps] = useState<InstalledApp[]>([]);
   const [appsLoading, setAppsLoading] = useState(true);
   const [sizesLoading, setSizesLoading] = useState(false);
-  const [totalAppSize, setTotalAppSize] = useState(0);
+  const [sizeMap, setSizeMap] = useState<Map<string, number>>(new Map());
+
+  // 将应用列表相关的状态更新标记为低优先级，避免阻塞用户交互
+  const [, startTransition] = useTransition();
 
   // 已迁移的路径列表
   const [migratedPaths, setMigratedPaths] = useState<string[]>([]);
@@ -105,22 +108,23 @@ export default function AppMigration() {
     try {
       setAppsLoading(true);
       const installedApps = await invoke<InstalledApp[]>('get_installed_apps');
-      setApps(installedApps);
+      startTransition(() => setApps(installedApps));
       // 后台异步加载目录大小，不阻塞 UI
       loadAppSizes(installedApps);
     } catch (error) {
       logger.error('获取应用列表失败:', error);
-      setApps([]);
+      startTransition(() => setApps([]));
     } finally {
       setAppsLoading(false);
     }
   }
 
   // 分批异步获取所有应用的目录大小
+  // 所有状态在循环结束后一次性写入，避免每批触发 React re-render 阻塞 UI
   async function loadAppSizes(appList: InstalledApp[]) {
     setSizesLoading(true);
     const batchSize = 8;
-    const sizeMap = new Map<string, number>();
+    const localSizeMap = new Map<string, number>();
 
     for (let i = 0; i < appList.length; i += batchSize) {
       const batch = appList.slice(i, i + batchSize);
@@ -128,32 +132,20 @@ export default function AppMigration() {
         batch.map(app => invoke<number>('get_app_size', { installLocation: app.install_location }))
       );
       for (let j = 0; j < batch.length; j++) {
+        const key = batch[j].registry_path || batch[j].install_location;
         const result = results[j];
         if (result.status === 'fulfilled') {
-          const key = batch[j].registry_path || batch[j].install_location;
-          sizeMap.set(key, result.value);
+          localSizeMap.set(key, result.value);
         }
       }
     }
 
-    // 一次性应用所有大小，避免渐进更新时的竞态问题
-    setApps(prev => {
-      let changed = false;
-      const updated = prev.map(app => {
-        const key = app.registry_path || app.install_location;
-        const size = sizeMap.get(key);
-        if (size !== undefined) {
-          changed = true;
-          return { ...app, estimated_size: size };
-        }
-        return app;
-      });
-      return changed ? updated : prev;
+    // 大小与 apps 数组解耦，不触发 100+ 个 InstalledApp 对象重建
+    // startTransition 让 React 在空闲时处理列表更新，保持 UI 响应
+    startTransition(() => {
+      setSizeMap(new Map(localSizeMap));
+      setSizesLoading(false);
     });
-
-    const total = Array.from(sizeMap.values()).reduce((a, b) => a + b, 0);
-    setTotalAppSize(total);
-    setSizesLoading(false);
   }
 
   // 获取应用迁移记录，并同步已迁移路径
@@ -667,8 +659,8 @@ export default function AppMigration() {
             onBatchMigrate={handleBatchMigrate}
             batchMigrating={batchMigrating}
             batchProgress={batchProgress}
-            totalAppSize={totalAppSize}
             sizesLoading={sizesLoading}
+            sizeMap={sizeMap}
           />
       </div>
 

@@ -3,7 +3,7 @@
 
 import { Package, Search, X, Link2, Check, ArrowRightLeft, FolderOpen } from 'lucide-react';
 import { InstalledApp } from '../types';
-import { useState, useMemo, useDeferredValue } from 'react';
+import { useState, useMemo, useDeferredValue, memo } from 'react';
 import FilterSelect from './FilterSelect';
 import EmptyState from './EmptyState';
 
@@ -35,8 +35,8 @@ interface AppListProps {
   onBatchMigrate?: () => void;
   batchMigrating?: boolean;
   batchProgress?: { current: number; total: number };
-  totalAppSize?: number;
   sizesLoading?: boolean;
+  sizeMap?: Map<string, number>;
 }
 
 function formatSize(kb: number): string {
@@ -75,10 +75,11 @@ function AppIcon({ app }: { app: InstalledApp }) {
   );
 }
 
-function AppRow({
+const AppRow = memo(function AppRow({
   app, onMigrate, onRestore, onUninstall, onOpenFolder,
   isUninstalling, isMigrated, isRestoring,
   isSelected, onToggleSelect, showCheckbox,
+  appSize,
 }: {
   app: InstalledApp;
   onMigrate: (app: InstalledApp) => void;
@@ -91,6 +92,7 @@ function AppRow({
   isSelected?: boolean;
   onToggleSelect?: (app: InstalledApp) => void;
   showCheckbox?: boolean;
+  appSize?: number;
 }) {
   const rowStyle: React.CSSProperties = {
     height: 'var(--row-height)' as unknown as string,
@@ -170,7 +172,7 @@ function AppRow({
         className="text-[11px] tabular-nums flex-shrink-0 w-16 text-right"
         style={{ color: 'var(--text-secondary)' }}
       >
-        {formatSize(app.estimated_size)}
+        {formatSize(appSize ?? 0)}
       </span>
 
       {/* actions */}
@@ -210,7 +212,7 @@ function AppRow({
       </div>
     </div>
   );
-}
+});
 
 function LoadingSkeleton() {
   const items = [1, 2, 3, 4, 5, 6, 7, 8];
@@ -246,7 +248,8 @@ export default function AppList({
   uninstallingKey = null, restoringKey = null, migratedPaths = [],
   selectedKeys, onToggleSelect, onSelectAll, onBatchMigrate,
   batchMigrating = false, batchProgress,
-  totalAppSize = 0, sizesLoading = false,
+  sizesLoading = false,
+  sizeMap,
 }: AppListProps) {
   const defaultOpenFolder = async (app: InstalledApp) => {
     try {
@@ -291,6 +294,17 @@ export default function AppList({
       return true;
     });
   }, [apps, deferredSearchQuery, migrationFilter, driveFilter, migratedPathSet]);
+
+  // 根据当前筛选/搜索结果聚合大小，跟随过滤条件实时变化
+  const filteredTotalSize = useMemo(() => {
+    if (!sizeMap || sizeMap.size === 0) return 0;
+    let total = 0;
+    for (const app of filteredApps) {
+      const key = app.registry_path || app.install_location;
+      total += sizeMap.get(key) ?? 0;
+    }
+    return total;
+  }, [filteredApps, sizeMap]);
 
   const migrationOptions: { value: MigrationFilter; label: string }[] = [
     { value: 'all', label: '全部状态' },
@@ -383,14 +397,6 @@ export default function AppList({
           style={{ color: 'var(--text-tertiary)' }}
         >
           {filteredApps.length} 个
-          {sizesLoading && (
-            <span className="ml-1 inline-block w-3 h-3 border border-[var(--color-primary)] border-t-transparent rounded-full animate-spin align-middle" />
-          )}
-          {!sizesLoading && totalAppSize > 0 && (
-            <span style={{ color: 'var(--text-secondary)' }}>
-              {' · '}总占用 {formatSize(totalAppSize)}
-            </span>
-          )}
         </span>
 
         {onToggleSelect && onSelectAll && onBatchMigrate && (
@@ -454,6 +460,7 @@ export default function AppList({
                   isSelected={selectedKeys?.has(key)}
                   onToggleSelect={onToggleSelect}
                   showCheckbox={!!onToggleSelect}
+                  appSize={sizeMap?.get(key)}
                 />
               );
             })}
@@ -462,6 +469,27 @@ export default function AppList({
           <div className='flex justify-center items-center w-full h-full'>
             <EmptyState icon={<Search />} title="未找到匹配的应用" description="尝试调整筛选条件或搜索关键词" />
           </div>
+        )}
+      </div>
+
+      {/* footer: 总占用 — 大小数据与列表解耦，仅在此处渲染一次 */}
+      <div
+        className="flex-shrink-0 flex items-center gap-2 text-[12px]"
+        style={{
+          padding: '8px 0',
+          color: 'var(--text-secondary)',
+          borderTop: '1px solid var(--border-color)',
+        }}
+      >
+        {sizesLoading ? (
+          <span className="inline-block w-3 h-3 border border-[var(--color-primary)] border-t-transparent rounded-full animate-spin" />
+        ) : (
+          <>
+            <span>总占用</span>
+            <span className="tabular-nums font-bold" style={{ color: 'var(--text-primary)' }}>
+              {formatSize(filteredTotalSize)}
+            </span>
+          </>
         )}
       </div>
     </div>
