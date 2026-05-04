@@ -214,14 +214,14 @@ impl AppScanner {
             let estimated_size: u64 =
                 subkey.get_value::<u32, _>("EstimatedSize").unwrap_or(0) as u64;
 
-            // DisplayIcon 指向的 exe 已不存在 → 清空图标路径，保留应用记录
+            // DisplayIcon 校验：若指向的文件不存在则清空，由 extract_icons_parallel 兜底
             let effective_icon = validate_display_icon(&display_icon);
 
             let registry_path = format!("{}\\{}\\{}", hive_name, base_path, subkey_name);
             let icon_path = if effective_icon.is_empty() {
-                display_icon.clone()
+                String::new() // 清空无效路径，后续从安装目录搜索 exe 提取图标
             } else {
-                effective_icon.clone()
+                effective_icon
             };
 
             apps.push(InstalledApp {
@@ -419,14 +419,24 @@ impl AppScanner {
         apps
     }
 
-    /// 并行提取图标（rayon scope）
+    /// 并行提取图标，主路径失败时从安装目录搜索 exe 兜底
     #[cfg(windows)]
     fn extract_icons_parallel(&self, apps: &mut [InstalledApp]) {
         apps.par_iter_mut().for_each(|app| {
-            // 提取图标 base64（线程安全：ICON_CACHE 内部有 Mutex）
+            // 主路径提取（DisplayIcon 指向的 exe/dll/ico）
             if !app.display_icon.is_empty() {
                 app.icon_base64 =
                     crate::system::icon::extract_icon_to_base64(&app.display_icon);
+            }
+            // 兜底：主路径提取失败时，从安装目录搜索 exe 提取嵌入图标
+            if app.icon_base64.is_empty() {
+                if let Some(fallback) = find_fallback_exe(&app.install_location) {
+                    app.icon_base64 =
+                        crate::system::icon::extract_icon_to_base64(&fallback);
+                    if !app.icon_base64.is_empty() {
+                        app.display_icon = fallback;
+                    }
+                }
             }
         });
     }
@@ -508,6 +518,47 @@ fn validate_display_icon(display_icon: &str) -> String {
         return String::new();
     }
     display_icon.to_string()
+}
+
+/// 在安装目录及其一级子目录中查找可提取图标的 exe 文件
+/// 当 DisplayIcon 指向的 .ico 文件不存在或 exe 路径失效时兜底
+#[cfg(windows)]
+fn find_fallback_exe(install_location: &str) -> Option<String> {
+    let dir = Path::new(install_location);
+    if !dir.is_dir() {
+        return None;
+    }
+    // 先查目录根下的 exe（如 D:\app\app.exe）
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file()
+                && path.extension().map(|e| e.eq_ignore_ascii_case("exe")).unwrap_or(false)
+            {
+                return Some(path.to_string_lossy().to_string());
+            }
+        }
+    }
+    // 再查一级子目录（如 D:\app\bin\studio.exe）
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.flatten() {
+            let sub_dir = entry.path();
+            if !sub_dir.is_dir() {
+                continue;
+            }
+            if let Ok(sub_entries) = std::fs::read_dir(&sub_dir) {
+                for sub_entry in sub_entries.flatten() {
+                    let sub_path = sub_entry.path();
+                    if sub_path.is_file()
+                        && sub_path.extension().map(|e| e.eq_ignore_ascii_case("exe")).unwrap_or(false)
+                    {
+                        return Some(sub_path.to_string_lossy().to_string());
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 /// 从命令字符串中正则提取目录路径（兜底方案）
