@@ -310,6 +310,16 @@ impl AppScanner {
             return None;
         }
 
+        // 硬过滤：LNK 指向安装包/更新程序/卸载器 → 直接跳过
+        let exe_name_lower = target_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+        if is_installer_like_exe(&exe_name_lower) {
+            return None;
+        }
+
         let dir_path = target_path.parent()?.to_path_buf();
         let install_location = dir_path.to_string_lossy().to_string();
 
@@ -648,12 +658,13 @@ fn derive_install_location_from_icon(icon_or_uninstall: &str) -> Option<String> 
 /// 判断文件名是否像安装包/卸载器/更新器
 #[cfg(windows)]
 fn is_installer_like_exe(file_name_lower: &str) -> bool {
-    // 基础黑名单
+    // 基础黑名单：安装包/更新器/卸载器关键字
     if file_name_lower.contains("setup")
         || file_name_lower.contains("install")
-        || file_name_lower.contains("unins")
         || file_name_lower.contains("update")
-        || file_name_lower.contains("assistant")
+        || file_name_lower.contains("upgrader")
+        || file_name_lower.starts_with("unins")
+        || file_name_lower.contains("uninst")
     {
         return true;
     }
@@ -744,9 +755,18 @@ fn is_bundled_runtime_dir(name: &str) -> bool {
     RUNTIMES.iter().any(|r| &lower == r)
 }
 
-/// 综合判断应跳过的目录
+/// 综合判断应跳过的目录（开发目录、运行时、临时/下载目录）
 #[cfg(windows)]
 fn is_skippable_dir(name: &str) -> bool {
+    // 常见临时与下载目录名——正常应用不会安装在这些目录下
+    const TRANSIENT_DIRS: &[&str] = &[
+        "download", "downloads", "temp", "tmp", "cache", "caches",
+        "updater", "updates", "installation", "installers",
+    ];
+    let lower = name.to_lowercase();
+    if TRANSIENT_DIRS.iter().any(|d| &lower == d) {
+        return true;
+    }
     is_dev_directory(name) || is_bundled_runtime_dir(name)
 }
 
@@ -935,28 +955,16 @@ fn score_application_candidate(
 
     score = score.min(1.0);
 
-    // 提前提取 stem 和文件名（供后续多项检查复用）
+    // 提前提取 stem（供后续多项检查复用）
     let stem = exe_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("");
-    let file_name_lower = exe_path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
 
     // 版本号模式惩罚（无论名称是否匹配均适用）
     // 阻止 aDrive-6.9.1.exe 等安装包因 Exact name match 获得过高评分
     if has_version_pattern_in_stem(stem) {
         score -= 0.30;
-    }
-
-    // 安装包/卸载器惩罚（仅当 exe 名与目录名无匹配时才生效）
-    // 若名称精确/包含匹配，说明 exe 是目录的"主程序"而非安装包，免惩罚
-    if matches!(name_match, NameMatchKind::None) {
-        if is_installer_like_exe(&file_name_lower) {
-            score -= 0.15;
-        }
     }
 
     // 随机文件名惩罚（高熵）
@@ -1015,10 +1023,11 @@ fn directory_looks_like_app(dir: &Path) -> Option<PathBuf> {
             match ext.to_lowercase().as_str() {
                 "exe" => {
                     exe_count += 1;
-                    let is_installer = is_installer_like_exe(&file_name_lower);
-                    if !is_installer {
-                        has_non_installer_exe = true;
+                    // 安装包/更新程序一票否决，不进入候选列表
+                    if is_installer_like_exe(&file_name_lower) {
+                        continue;
                     }
+                    has_non_installer_exe = true;
                     let exe_name = path
                         .file_stem()
                         .and_then(|s| s.to_str())
