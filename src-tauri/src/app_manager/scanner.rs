@@ -26,8 +26,8 @@ use walkdir::WalkDir;
 const REGISTRY_CACHE_TTL_SECS: u64 = 30;
 /// 熵值阈值：Shannon 熵 >= 此值视为随机文件名
 const ENTROPY_THRESHOLD: f64 = 3.5;
-/// 注册表应用数达到此阈值后跳过 Tier 2 + Tier 3（提前终止）
-const EARLY_EXIT_APP_COUNT: usize = 200;
+/// 注册表应用数达到此阈值后跳过 Tier 3 文件系统扫描（Tier 2 LNK 始终执行）
+const EARLY_EXIT_APP_COUNT: usize = 1000;
 /// 评分阈值
 const SCORE_THRESHOLD: f32 = 0.35;
 
@@ -74,23 +74,12 @@ impl AppScanner {
         let t1_ms = t1_start.elapsed().as_millis();
         orbit_log!("INFO", "scanner", "Tier1 注册表扫描完成: {} 个应用, {}ms", apps.len(), t1_ms);
 
-        // 提前终止：注册表已覆盖足够多应用
-        if apps.len() >= EARLY_EXIT_APP_COUNT {
-            orbit_log!("INFO", "scanner", "注册表应用数 >= {}, 跳过 Tier2+Tier3", EARLY_EXIT_APP_COUNT);
-            apps.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
-            self.extract_icons_parallel(&mut apps);
-            *self.last_full_scan.lock().unwrap() = Some(Instant::now());
-            orbit_log!("INFO", "scanner", "全量扫描完成(提前终止): {}ms", total_start.elapsed().as_millis());
-            return Ok(apps);
-        }
-
-        // 收集已知路径用于去重
+        // Tier 2：LNK 快捷方式解析（始终执行——准确度极高、耗时极短）
         let existing_paths: HashSet<String> = apps
             .iter()
             .map(|a| normalize_path(&a.install_location))
             .collect();
 
-        // Tier 2：LNK 快捷方式解析
         let t2_start = Instant::now();
         let lnk_apps = self.scan_lnk_shortcuts(&existing_paths);
         let t2_ms = t2_start.elapsed().as_millis();
@@ -101,6 +90,20 @@ impl AppScanner {
             .chain(lnk_apps.iter().map(|a| normalize_path(&a.install_location)))
             .collect();
         apps.extend(lnk_apps);
+
+        // 提前终止：注册表覆盖足够多应用时仅跳过 Tier 3 文件系统扫描
+        if apps.len() >= EARLY_EXIT_APP_COUNT {
+            orbit_log!("INFO", "scanner", "应用数 >= {}，跳过 Tier3 文件系统扫描", EARLY_EXIT_APP_COUNT);
+            apps.sort_by(|a, b| a.display_name.to_lowercase().cmp(&b.display_name.to_lowercase()));
+            self.extract_icons_parallel(&mut apps);
+            // 写入缓存
+            if let Ok(mut cache) = self.registry_cache.lock() {
+                *cache = Some((Instant::now(), apps.clone()));
+            }
+            *self.last_full_scan.lock().unwrap() = Some(Instant::now());
+            orbit_log!("INFO", "scanner", "全量扫描完成(提前终止): {}ms", total_start.elapsed().as_millis());
+            return Ok(apps);
+        }
 
         // Tier 3：受限文件系统扫描
         let t3_start = Instant::now();
@@ -243,10 +246,10 @@ impl AppScanner {
         let mut apps: Vec<InstalledApp> = Vec::new();
         let mut seen: HashSet<String> = existing_paths.clone();
 
-        // 并行扫描各 LNK 目录
+        // 并行扫描各 LNK 目录（深度 5，覆盖 Programs\Tencent\WeChat\ 等嵌套）
         let results: Vec<Vec<InstalledApp>> = lnk_dirs
             .par_iter()
-            .map(|dir| self.scan_lnk_dir(dir, &seen))
+            .map(|dir| self.scan_lnk_dir(dir, 0, 5, &seen))
             .collect();
 
         for result in results {
@@ -262,11 +265,12 @@ impl AppScanner {
         apps
     }
 
-    /// 扫描单个目录下的 .lnk 文件
+    /// 递归扫描目录下的 .lnk 文件，深度上限 5
+    /// 覆盖 Programs\Tencent\WeChat\WeChat.lnk 等深层嵌套快捷方式
     #[cfg(windows)]
-    fn scan_lnk_dir(&self, dir: &Path, existing: &HashSet<String>) -> Vec<InstalledApp> {
+    fn scan_lnk_dir(&self, dir: &Path, depth: usize, max_depth: usize, existing: &HashSet<String>) -> Vec<InstalledApp> {
         let mut apps: Vec<InstalledApp> = Vec::new();
-        if !dir.exists() {
+        if depth > max_depth || !dir.exists() {
             return apps;
         }
 
@@ -278,17 +282,8 @@ impl AppScanner {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                // 递归一层（Start Menu 中的子目录如 "Startup"）
-                if let Ok(sub_entries) = std::fs::read_dir(&path) {
-                    for sub in sub_entries.flatten() {
-                        let sub_path = sub.path();
-                        if sub_path.extension().map(|e| e == "lnk").unwrap_or(false) {
-                            if let Some(app) = self.resolve_lnk_file(&sub_path, existing) {
-                                apps.push(app);
-                            }
-                        }
-                    }
-                }
+                // 递归进入子目录（不限深度地探索 Start Menu 嵌套结构）
+                apps.extend(self.scan_lnk_dir(&path, depth + 1, max_depth, existing));
                 continue;
             }
             if path.extension().map(|e| e == "lnk").unwrap_or(false) {
@@ -360,11 +355,11 @@ impl AppScanner {
     /// Tier 3：受限文件系统扫描
     #[cfg(windows)]
     fn scan_filesystem_constrained(&self, existing_paths: &HashSet<String>) -> Vec<InstalledApp> {
-        let (pf_roots, lad_roots, other_roots) = collect_filesystem_roots();
+        let (pf_roots, lad_roots, other_roots, hp_roots) = collect_filesystem_roots();
         let mut apps: Vec<InstalledApp> = Vec::new();
         let mut seen: HashSet<String> = HashSet::new();
 
-        // 并行扫描三组根目录
+        // Program Files 系：深度 2（标准安装位置）
         let pf_results: Vec<InstalledApp> = pf_roots
             .par_iter()
             .flat_map(|root| {
@@ -375,6 +370,7 @@ impl AppScanner {
             })
             .collect();
 
+        // LocalAppData / ProgramData 系：深度 2
         let lad_results: Vec<InstalledApp> = lad_roots
             .par_iter()
             .flat_map(|root| {
@@ -385,13 +381,24 @@ impl AppScanner {
             })
             .collect();
 
+        // 高优先级自定义目录（D:\software, E:\tools 等）：深度 3
+        let hp_results: Vec<InstalledApp> = hp_roots
+            .par_iter()
+            .flat_map(|root| {
+                let mut out = Vec::new();
+                let mut s = HashSet::new();
+                scan_directory_constrained(root, 0, 3, existing_paths, &mut s, &mut out, None);
+                out
+            })
+            .collect();
+
+        // 非系统盘根目录：深度 2（严格分级，依赖注册表 + LNK 覆盖 99% 场景）
         let other_results: Vec<InstalledApp> = other_roots
             .par_iter()
             .flat_map(|root| {
                 let mut out = Vec::new();
                 let mut s = HashSet::new();
-                // 非系统盘：仅扫描一级子目录
-                scan_directory_constrained(root, 0, 1, existing_paths, &mut s, &mut out, None);
+                scan_directory_constrained(root, 0, 2, existing_paths, &mut s, &mut out, None);
                 out
             })
             .collect();
@@ -399,6 +406,7 @@ impl AppScanner {
         for app in pf_results
             .into_iter()
             .chain(lad_results)
+            .chain(hp_results)
             .chain(other_results)
         {
             let key = normalize_path(&app.install_location);
@@ -502,6 +510,44 @@ fn validate_display_icon(display_icon: &str) -> String {
     display_icon.to_string()
 }
 
+/// 从命令字符串中正则提取目录路径（兜底方案）
+/// 处理 "C:\...\uninst.exe" /SILENT 等格式，即使 exe 已不存在也能提取目录
+#[cfg(windows)]
+fn extract_dir_from_command_string(raw: &str) -> Option<String> {
+    let s = raw.trim().trim_matches('"');
+    // 找第一个 X:\ 驱动器模式
+    if let Some(drive_idx) = s.find(|c: char| c.is_ascii_alphabetic()) {
+        let rest = &s[drive_idx..];
+        if rest.len() < 3 || rest.as_bytes().get(1) != Some(&b':') || rest.as_bytes().get(2) != Some(&b'\\') {
+            return None;
+        }
+        // 找路径结束：遇到 " 或空格后跟 / -
+        let path_end = rest.find('"')
+            .or_else(|| rest.find(" /"))
+            .or_else(|| rest.find(" -"))
+            .unwrap_or(rest.len());
+        let path_str = &rest[..path_end].trim();
+        let p = Path::new(path_str);
+        // 获取父目录（若路径指向文件）或目录本身
+        let dir = if p.is_file() || p.extension().is_some() {
+            p.parent()?.to_path_buf()
+        } else {
+            p.to_path_buf()
+        };
+        let lower = dir.to_string_lossy().to_lowercase();
+        if lower.contains("\\windows\\system32")
+            || lower.contains("\\windows\\syswow64")
+            || lower.contains("\\common files\\")
+        {
+            return None;
+        }
+        if dir.exists() {
+            return Some(dir.to_string_lossy().to_string());
+        }
+    }
+    None
+}
+
 /// 从 DisplayIcon / UninstallString 尝试推导安装目录
 #[cfg(windows)]
 fn derive_install_location_from_icon(icon_or_uninstall: &str) -> Option<String> {
@@ -529,7 +575,9 @@ fn derive_install_location_from_icon(icon_or_uninstall: &str) -> Option<String> 
 
     let p = Path::new(&candidate);
     if !p.exists() {
-        return None;
+        // 正则兜底：exe 文件不存在时，尝试从命令字符串中提取目录
+        // 如 "C:\App\unins000.exe" /SILENT → 提取 C:\App
+        return extract_dir_from_command_string(raw);
     }
     let dir = if p.is_file() {
         p.parent()?.to_path_buf()
@@ -549,22 +597,79 @@ fn derive_install_location_from_icon(icon_or_uninstall: &str) -> Option<String> 
 /// 判断文件名是否像安装包/卸载器/更新器
 #[cfg(windows)]
 fn is_installer_like_exe(file_name_lower: &str) -> bool {
+    // 基础黑名单
     if file_name_lower.contains("setup")
         || file_name_lower.contains("install")
         || file_name_lower.contains("unins")
         || file_name_lower.contains("update")
+        || file_name_lower.contains("assistant")
     {
         return true;
     }
+    
+    // 识别带版本号的安装包 (如 PCQQ2021.exe, v1.2.3_full.exe)
+    // 应用主程序通常不包含 4 位连续数字（年份）或过长的数字串
+    let has_year_pattern = file_name_lower.chars()
+        .collect::<Vec<_>>()
+        .windows(4)
+        .any(|w| w.iter().all(|c| c.is_ascii_digit()));
+
+    // 数字.数字 版本号模式（如 aDrive-6.9.1.exe、app-2.0.3.exe）
+    let has_dot_version = file_name_lower
+        .chars()
+        .collect::<Vec<_>>()
+        .windows(3)
+        .any(|w| w[0].is_ascii_digit() && w[1] == '.' && w[2].is_ascii_digit());
+
+    // 常见的安装包特征后缀
     if file_name_lower.ends_with("_x64.exe")
         || file_name_lower.ends_with("_x86.exe")
-        || file_name_lower.ends_with("_win64.exe")
-        || file_name_lower.ends_with("_win32.exe")
         || file_name_lower.ends_with(".msi")
     {
         return true;
     }
+
+    // 如果文件名包含年份且长度较长，极大概率是安装包而非主程序
+    if has_year_pattern && file_name_lower.len() > 10 {
+        return true;
+    }
+
+    // 数字.数字 版本号在文件名中（不是目录名），安装包特征
+    if has_dot_version {
+        return true;
+    }
+
     false
+}
+
+/// 判断 exe 文件名（不含扩展名）是否包含版本号模式
+/// 如 "PCQQ2021"、"app_v1.2.3"、"setup_2024_x64"、"aDrive-6.9.1" 等
+#[cfg(windows)]
+fn has_version_pattern_in_stem(stem: &str) -> bool {
+    let stem_lower = stem.to_lowercase();
+    // 4 位连续数字（年份模式，如 2021、2024）
+    let has_year = stem_lower
+        .chars()
+        .collect::<Vec<_>>()
+        .windows(4)
+        .any(|w| w.iter().all(|c| c.is_ascii_digit()));
+    if has_year {
+        return true;
+    }
+    // v 后跟数字版本号（v1、v1.2、v2.0.1）
+    if let Some(v_pos) = stem_lower.find('v') {
+        let after_v = &stem_lower[v_pos + 1..];
+        if after_v.starts_with(|c: char| c.is_ascii_digit()) {
+            return true;
+        }
+    }
+    // 数字.数字 版本号模式（如 6.9.1、2.0、3.12.0）
+    // 正常应用主程序极少在文件名中使用 X.Y 格式
+    stem_lower
+        .chars()
+        .collect::<Vec<_>>()
+        .windows(3)
+        .any(|w| w[0].is_ascii_digit() && w[1] == '.' && w[2].is_ascii_digit())
 }
 
 /// 判断是否为开发/构建目录
@@ -779,22 +884,44 @@ fn score_application_candidate(
 
     score = score.min(1.0);
 
-    // 安装包/卸载器惩罚
-    let file_name_lower = exe_path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_lowercase())
-        .unwrap_or_default();
-    if is_installer_like_exe(&file_name_lower) {
-        score -= 0.15;
-    }
-
-    // 随机文件名惩罚（高熵）
+    // 提前提取 stem 和文件名（供后续多项检查复用）
     let stem = exe_path
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("");
+    let file_name_lower = exe_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    // 版本号模式惩罚（无论名称是否匹配均适用）
+    // 阻止 aDrive-6.9.1.exe 等安装包因 Exact name match 获得过高评分
+    if has_version_pattern_in_stem(stem) {
+        score -= 0.30;
+    }
+
+    // 安装包/卸载器惩罚（仅当 exe 名与目录名无匹配时才生效）
+    // 若名称精确/包含匹配，说明 exe 是目录的"主程序"而非安装包，免惩罚
+    if matches!(name_match, NameMatchKind::None) {
+        if is_installer_like_exe(&file_name_lower) {
+            score -= 0.15;
+        }
+    }
+
+    // 随机文件名惩罚（高熵）
     if is_random_filename(stem) {
         score -= 0.20;
+    }
+
+    // 数字占比惩罚：exe 名含大量数字但与父目录名不匹配（如 PCQQ2021.exe）
+    if matches!(name_match, NameMatchKind::None) {
+        let digit_count = stem.chars().filter(|c| c.is_ascii_digit()).count();
+        if stem.len() > 0 {
+            let digit_ratio = digit_count as f32 / stem.len() as f32;
+            if digit_ratio > 0.30 {
+                score -= 0.15;
+            }
+        }
     }
 
     score
@@ -1071,8 +1198,9 @@ fn parse_lnk_target(lnk_path: &Path) -> Option<String> {
 // ============================================================================
 
 /// 收集文件系统扫描根目录
+/// 返回 (program_files, local_app_data, other_drives, high_priority_app_dirs)
 #[cfg(windows)]
-fn collect_filesystem_roots() -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>) {
+fn collect_filesystem_roots() -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>) {
     let mut pf_roots: Vec<PathBuf> = Vec::new();
     if let Some(pf) = std::env::var_os("ProgramFiles") {
         pf_roots.push(PathBuf::from(pf));
@@ -1095,6 +1223,13 @@ fn collect_filesystem_roots() -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>) {
     }
 
     let mut other_roots: Vec<PathBuf> = Vec::new();
+    let mut high_priority_roots: Vec<PathBuf> = Vec::new();
+
+    // 用户常见的便携/绿色应用存放目录名
+    const APP_DIR_NAMES: &[&str] = &[
+        "software", "app", "apps", "tools", "games", "programs", "applications", "portable",
+    ];
+
     let disks = sysinfo::Disks::new_with_refreshed_list();
     for disk in &disks {
         let mount = disk.mount_point();
@@ -1102,10 +1237,19 @@ fn collect_filesystem_roots() -> (Vec<PathBuf>, Vec<PathBuf>, Vec<PathBuf>) {
         if mount_str.starts_with("C:") {
             continue;
         }
-        other_roots.push(mount.to_path_buf());
+        let mount_path = mount.to_path_buf();
+        other_roots.push(mount_path.clone());
+
+        // 将用户常见的软件存放目录列为高优先级扫描根
+        for dir_name in APP_DIR_NAMES {
+            let candidate = mount_path.join(dir_name);
+            if candidate.exists() && candidate.is_dir() {
+                high_priority_roots.push(candidate);
+            }
+        }
     }
 
-    (pf_roots, lad_roots, other_roots)
+    (pf_roots, lad_roots, other_roots, high_priority_roots)
 }
 
 /// 受限递归扫描（单线程内部使用，由 rayon 并行调度外层）
@@ -1144,6 +1288,18 @@ fn scan_directory_constrained(
     }
 
     if let Some(exe_path) = directory_looks_like_app(dir) {
+        // Tier 3 激进过滤：exe 含版本号且不在注册表/LNK 已知路径中 → 丢弃
+        // 阻止 PCQQ2021.exe、app_v2.0_setup.exe 等安装包被误判为应用
+        let dir_key = normalize_path(&dir.to_string_lossy());
+        if !existing_paths.contains(&dir_key) {
+            let stem = exe_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("");
+            if has_version_pattern_in_stem(stem) {
+                return;
+            }
+        }
         maybe_push_app(dir, &exe_path, existing_paths, seen, out);
         return;
     }

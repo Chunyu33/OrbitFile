@@ -27,6 +27,8 @@ import {
 export default function AppMigration() {
   const [apps, setApps] = useState<InstalledApp[]>([]);
   const [appsLoading, setAppsLoading] = useState(true);
+  const [sizesLoading, setSizesLoading] = useState(false);
+  const [totalAppSize, setTotalAppSize] = useState(0);
 
   // 已迁移的路径列表
   const [migratedPaths, setMigratedPaths] = useState<string[]>([]);
@@ -104,12 +106,54 @@ export default function AppMigration() {
       setAppsLoading(true);
       const installedApps = await invoke<InstalledApp[]>('get_installed_apps');
       setApps(installedApps);
+      // 后台异步加载目录大小，不阻塞 UI
+      loadAppSizes(installedApps);
     } catch (error) {
       logger.error('获取应用列表失败:', error);
       setApps([]);
     } finally {
       setAppsLoading(false);
     }
+  }
+
+  // 分批异步获取所有应用的目录大小
+  async function loadAppSizes(appList: InstalledApp[]) {
+    setSizesLoading(true);
+    const batchSize = 8;
+    const sizeMap = new Map<string, number>();
+
+    for (let i = 0; i < appList.length; i += batchSize) {
+      const batch = appList.slice(i, i + batchSize);
+      const results = await Promise.allSettled(
+        batch.map(app => invoke<number>('get_app_size', { installLocation: app.install_location }))
+      );
+      for (let j = 0; j < batch.length; j++) {
+        const result = results[j];
+        if (result.status === 'fulfilled') {
+          const key = batch[j].registry_path || batch[j].install_location;
+          sizeMap.set(key, result.value);
+        }
+      }
+    }
+
+    // 一次性应用所有大小，避免渐进更新时的竞态问题
+    setApps(prev => {
+      let changed = false;
+      const updated = prev.map(app => {
+        const key = app.registry_path || app.install_location;
+        const size = sizeMap.get(key);
+        if (size !== undefined) {
+          changed = true;
+          return { ...app, estimated_size: size };
+        }
+        return app;
+      });
+      return changed ? updated : prev;
+    });
+
+    const total = Array.from(sizeMap.values()).reduce((a, b) => a + b, 0);
+    setTotalAppSize(total);
+    setSizesLoading(false);
   }
 
   // 获取应用迁移记录，并同步已迁移路径
@@ -623,6 +667,8 @@ export default function AppMigration() {
             onBatchMigrate={handleBatchMigrate}
             batchMigrating={batchMigrating}
             batchProgress={batchProgress}
+            totalAppSize={totalAppSize}
+            sizesLoading={sizesLoading}
           />
       </div>
 

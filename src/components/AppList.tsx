@@ -35,6 +35,8 @@ interface AppListProps {
   onBatchMigrate?: () => void;
   batchMigrating?: boolean;
   batchProgress?: { current: number; total: number };
+  totalAppSize?: number;
+  sizesLoading?: boolean;
 }
 
 function formatSize(kb: number): string {
@@ -244,6 +246,7 @@ export default function AppList({
   uninstallingKey = null, restoringKey = null, migratedPaths = [],
   selectedKeys, onToggleSelect, onSelectAll, onBatchMigrate,
   batchMigrating = false, batchProgress,
+  totalAppSize = 0, sizesLoading = false,
 }: AppListProps) {
   const defaultOpenFolder = async (app: InstalledApp) => {
     try {
@@ -380,6 +383,14 @@ export default function AppList({
           style={{ color: 'var(--text-tertiary)' }}
         >
           {filteredApps.length} 个
+          {sizesLoading && (
+            <span className="ml-1 inline-block w-3 h-3 border border-[var(--color-primary)] border-t-transparent rounded-full animate-spin align-middle" />
+          )}
+          {!sizesLoading && totalAppSize > 0 && (
+            <span style={{ color: 'var(--text-secondary)' }}>
+              {' · '}总占用 {formatSize(totalAppSize)}
+            </span>
+          )}
         </span>
 
         {onToggleSelect && onSelectAll && onBatchMigrate && (
