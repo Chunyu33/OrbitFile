@@ -24,11 +24,16 @@ import {
   UninstallResult,
 } from '../types';
 
+// 模块级大小缓存：Tab 切换后无需重新遍历磁盘获取目录大小
+// 仅当应用列表变更（卸载/迁移/手动刷新）时才重新计算
+let cachedSizeMap: Map<string, number> | null = null;
+
 export default function AppMigration() {
   const [apps, setApps] = useState<InstalledApp[]>([]);
   const [appsLoading, setAppsLoading] = useState(true);
   const [sizesLoading, setSizesLoading] = useState(false);
-  const [sizeMap, setSizeMap] = useState<Map<string, number>>(new Map());
+  const [sizeMap, setSizeMap] = useState<Map<string, number>>(cachedSizeMap ?? new Map());
+  const [refreshing, setRefreshing] = useState(false);
 
   // 将应用列表相关的状态更新标记为低优先级，避免阻塞用户交互
   const [, startTransition] = useTransition();
@@ -120,8 +125,21 @@ export default function AppMigration() {
   }
 
   // 分批异步获取所有应用的目录大小
-  // 所有状态在循环结束后一次性写入，避免每批触发 React re-render 阻塞 UI
+  // 命中模块级缓存时跳过全部 IO，实现 Tab 切回"秒开"
   async function loadAppSizes(appList: InstalledApp[]) {
+    // 检查模块级缓存：key 集合一致则直接复用，零 IO 开销
+    if (cachedSizeMap && cachedSizeMap.size > 0) {
+      const currentKeys = new Set(appList.map(a => a.registry_path || a.install_location));
+      const cachedKeys = new Set(cachedSizeMap.keys());
+      if (currentKeys.size === cachedKeys.size && [...currentKeys].every(k => cachedKeys.has(k))) {
+        // 缓存命中，跳过全部磁盘遍历
+        startTransition(() => {
+          setSizeMap(new Map(cachedSizeMap!));
+        });
+        return;
+      }
+    }
+
     setSizesLoading(true);
     const batchSize = 8;
     const localSizeMap = new Map<string, number>();
@@ -140,8 +158,8 @@ export default function AppMigration() {
       }
     }
 
-    // 大小与 apps 数组解耦，不触发 100+ 个 InstalledApp 对象重建
-    // startTransition 让 React 在空闲时处理列表更新，保持 UI 响应
+    // 写入模块级缓存 + React 状态
+    cachedSizeMap = new Map(localSizeMap);
     startTransition(() => {
       setSizeMap(new Map(localSizeMap));
       setSizesLoading(false);
@@ -163,7 +181,25 @@ export default function AppMigration() {
   }
 
   async function handleRefresh() {
+    cachedSizeMap = null; // 应用列表已变更（迁移/卸载），强制重新计算大小
     await Promise.all([fetchInstalledApps(), fetchAppMigrationRecords()]);
+  }
+
+  // 手动刷新：清空后端缓存 + 前端大小缓存，强制全量扫描
+  async function handleRefreshApps() {
+    setRefreshing(true);
+    cachedSizeMap = null; // 重置前端大小缓存
+    try {
+      const freshApps = await invoke<InstalledApp[]>('refresh_apps');
+      startTransition(() => setApps(freshApps));
+      // 刷新后重新加载大小，但迁移记录无需重刷
+      loadAppSizes(freshApps);
+      await fetchAppMigrationRecords();
+    } catch (error) {
+      logger.error('刷新应用列表失败:', error);
+    } finally {
+      setRefreshing(false);
+    }
   }
 
   // 还原流程：将已迁移应用恢复到原始位置
@@ -661,6 +697,8 @@ export default function AppMigration() {
             batchProgress={batchProgress}
             sizesLoading={sizesLoading}
             sizeMap={sizeMap}
+            onRefresh={handleRefreshApps}
+            refreshing={refreshing}
           />
       </div>
 

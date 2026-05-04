@@ -1494,24 +1494,9 @@ fn compute_dir_size_kb(dir: &Path) -> u64 {
 // 公共 API
 // ============================================================================
 
-/// 获取已安装应用列表（委托给全局 AppScanner 单例）
+/// 获取已安装应用列表（优先读取内存缓存，避免重复全量扫描）
 pub fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
-    #[cfg(windows)]
-    {
-        // 先检查缓存
-        if let Ok(cache) = SCANNER.registry_cache.lock() {
-            if let Some((timestamp, cached)) = cache.as_ref() {
-                if timestamp.elapsed().as_secs() < REGISTRY_CACHE_TTL_SECS {
-                    return Ok(cached.clone());
-                }
-            }
-        }
-        SCANNER.scan_all()
-    }
-    #[cfg(not(windows))]
-    {
-        Ok(Vec::new())
-    }
+    crate::app_manager::cache::get_or_scan()
 }
 
 /// 增量扫描：仅刷新注册表（若 TTL 过期）

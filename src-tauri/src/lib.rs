@@ -29,6 +29,12 @@ fn get_installed_apps() -> Result<Vec<InstalledApp>, String> {
     app_manager::scanner::get_installed_apps()
 }
 
+/// 强制刷新应用列表：清空内存缓存并触发全量扫描
+#[tauri::command]
+fn refresh_apps() -> Result<Vec<InstalledApp>, String> {
+    app_manager::cache::refresh()
+}
+
 #[tauri::command]
 fn get_app_size(install_location: String) -> Result<u64, String> {
     app_manager::scanner::get_app_size(install_location)
@@ -48,9 +54,17 @@ fn migrate_app(
     app_handle: tauri::AppHandle,
 ) -> Result<MigrationResult, String> {
     state.cancel_flag.store(false, Ordering::SeqCst);
-    app_manager::migration::migrate_app(
+    let source_clone = source.clone(); // 缓存更新需要旧路径引用
+    let result = app_manager::migration::migrate_app(
         app_name, source, target_parent, &state.cancel_flag, &app_handle,
-    )
+    )?;
+    // 迁移成功后增量更新缓存，避免全量重扫
+    if result.success {
+        if let Some(ref new_path) = result.new_path {
+            app_manager::cache::on_app_migrated(&source_clone, new_path);
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -84,12 +98,28 @@ fn preview_uninstall(input: uninstaller::UninstallInput) -> Result<uninstaller::
 
 #[tauri::command]
 fn force_remove_application(input: uninstaller::UninstallInput) -> Result<uninstaller::UninstallResult, String> {
-    uninstaller::force_remove_application(input)
+    let install_location = input.install_location.clone();
+    let result = uninstaller::force_remove_application(input)?;
+    // 强删成功后从缓存中移除，避免显示已不存在的应用
+    if result.success {
+        if let Some(ref loc) = install_location {
+            app_manager::cache::on_app_uninstalled(loc);
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
 async fn uninstall_application(input: uninstaller::UninstallInput) -> Result<uninstaller::UninstallResult, String> {
-    uninstaller::uninstall_application(input).await
+    let install_location = input.install_location.clone();
+    let result = uninstaller::uninstall_application(input).await?;
+    // 正常卸载成功后同样从缓存移除
+    if result.success {
+        if let Some(ref loc) = install_location {
+            app_manager::cache::on_app_uninstalled(loc);
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -146,6 +176,7 @@ pub fn run() {
             storage::operation_log::get_operation_logs,
             // 应用管理
             get_installed_apps,
+            refresh_apps,
             get_app_size,
             check_process_locks,
             migrate_app,

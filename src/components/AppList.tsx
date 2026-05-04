@@ -1,14 +1,20 @@
 // 应用列表组件 — 桌面工具风格
 // 表格化行布局，紧凑信息密度，弱化操作按钮视觉
 
-import { Package, Search, X, Link2, Check, ArrowRightLeft, FolderOpen } from 'lucide-react';
+import { Package, Search, X, Link2, Check, ArrowRightLeft, FolderOpen, RotateCw } from 'lucide-react';
 import { InstalledApp } from '../types';
-import { useState, useMemo, useDeferredValue, memo } from 'react';
+import { useState, useMemo, useDeferredValue, memo, useEffect } from 'react';
 import FilterSelect from './FilterSelect';
 import EmptyState from './EmptyState';
 
 type MigrationFilter = 'all' | 'migrated' | 'not_migrated';
 type DriveFilter = 'all' | 'c' | 'other';
+
+// 模块级状态缓存：Tab 切换时 AppList 被卸载，搜索/筛选条件保留在此
+// 下次挂载时自动恢复，用户无感知
+let cachedSearchQuery = '';
+let cachedMigrationFilter: MigrationFilter = 'all';
+let cachedDriveFilter: DriveFilter = 'all';
 
 function extractDriveLetters(apps: InstalledApp[]): string[] {
   const drives = new Set<string>();
@@ -37,6 +43,8 @@ interface AppListProps {
   batchProgress?: { current: number; total: number };
   sizesLoading?: boolean;
   sizeMap?: Map<string, number>;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
 function formatSize(kb: number): string {
@@ -250,6 +258,8 @@ export default function AppList({
   batchMigrating = false, batchProgress,
   sizesLoading = false,
   sizeMap,
+  onRefresh,
+  refreshing = false,
 }: AppListProps) {
   const defaultOpenFolder = async (app: InstalledApp) => {
     try {
@@ -260,10 +270,15 @@ export default function AppList({
     }
   };
   const handleOpenFolder = onOpenFolder ?? defaultOpenFolder;
-  const [inputQuery, setInputQuery] = useState('');
-  const [migrationFilter, setMigrationFilter] = useState<MigrationFilter>('all');
-  const [driveFilter, setDriveFilter] = useState<DriveFilter>('all');
+  const [inputQuery, setInputQuery] = useState(cachedSearchQuery);
+  const [migrationFilter, setMigrationFilter] = useState<MigrationFilter>(cachedMigrationFilter);
+  const [driveFilter, setDriveFilter] = useState<DriveFilter>(cachedDriveFilter);
   const deferredSearchQuery = useDeferredValue(inputQuery);
+
+  // 将搜索/筛选状态同步到模块级缓存，跨越 Tab 切换保持
+  useEffect(() => { cachedSearchQuery = inputQuery; }, [inputQuery]);
+  useEffect(() => { cachedMigrationFilter = migrationFilter; }, [migrationFilter]);
+  useEffect(() => { cachedDriveFilter = driveFilter; }, [driveFilter]);
   const migratedPathSet = useMemo(
     () => new Set(migratedPaths.map((path) => path.toLowerCase())),
     [migratedPaths],
@@ -393,10 +408,20 @@ export default function AppList({
           className="w-[120px]"
         />
         <span
-          className="text-[11px] flex-shrink-0 ml-1"
+          className="text-[11px] flex-shrink-0 ml-1 flex items-center gap-1"
           style={{ color: 'var(--text-tertiary)' }}
         >
           {filteredApps.length} 个
+          {onRefresh && (
+            <button
+              onClick={onRefresh}
+              className="btn btn-ghost btn-icon w-5 h-5 flex items-center justify-center"
+              title="刷新应用列表"
+              disabled={refreshing}
+            >
+              <RotateCw className={`w-3 h-3 ${refreshing ? 'animate-spin' : ''}`} />
+            </button>
+          )}
         </span>
 
         {onToggleSelect && onSelectAll && onBatchMigrate && (

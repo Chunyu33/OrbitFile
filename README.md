@@ -61,7 +61,8 @@ Windows 用户经常面临以下困扰：
 │  │  • mod.rs           大文件夹发现与迁移     │               │
 │  ├──────────────────────────────────────────┤               │
 │  │  app_manager/                            │               │
-│  │  • scanner.rs       注册表扫描            │               │
+│  │  • cache.rs         内存级应用缓存         │               │
+│  │  • scanner.rs       三级扫描引擎           │               │
 │  │  • migration.rs     应用迁移引擎           │               │
 │  │  • uninstaller.rs   卸载与残留清理         │               │
 │  │  • detector.rs      特殊目录检测          │               │
@@ -120,7 +121,8 @@ orbit-file/
 │   │   │   └── mod.rs            # 大文件夹发现、迁移与恢复
 │   │   └── app_manager/          # 应用管理层
 │   │       ├── mod.rs
-│   │       ├── scanner.rs        # 注册表扫描（HKLM/HKCU × 32/64-bit）
+│   │       ├── cache.rs          # 内存级应用缓存（AppCache 全局单例）
+│   │       ├── scanner.rs        # 三级扫描引擎（注册表 + LNK + FS）
 │   │       ├── migration.rs      # 迁移引擎（9 步流程）
 │   │       ├── uninstaller.rs    # 卸载/残留扫描/强制删除
 │   │       ├── detector.rs       # 特殊目录动态检测
