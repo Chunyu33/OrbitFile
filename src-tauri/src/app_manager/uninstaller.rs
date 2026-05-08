@@ -595,17 +595,17 @@ pub async fn uninstall_application(input: UninstallInput) -> Result<UninstallRes
             .unwrap_or("未知应用")
             .to_string();
         let uninstall_cmds = resolve_uninstall_commands(&input)?;
-        eprintln!("[orbit-file][uninstall] 候选卸载命令数量: {}", uninstall_cmds.len());
+        eprintln!("[viap][uninstall] 候选卸载命令数量: {}", uninstall_cmds.len());
         let mut executed_cmd: Option<String> = None;
         let mut command_errors: Vec<String> = Vec::new();
 
         for uninstall_cmd in uninstall_cmds {
-            eprintln!("[orbit-file][uninstall] 尝试执行命令: {}", uninstall_cmd);
+            eprintln!("[viap][uninstall] 尝试执行命令: {}", uninstall_cmd);
             match start_uninstall_process(&uninstall_cmd) {
                 Ok(_) => {
                     executed_cmd = Some(uninstall_cmd.clone());
                     if !wait_until_uninstalled(&input) {
-                        eprintln!("[orbit-file][uninstall] 命令执行后仍检测到已安装，继续尝试下一条命令");
+                        eprintln!("[viap][uninstall] 命令执行后仍检测到已安装，继续尝试下一条命令");
                         continue;
                     }
 
@@ -738,7 +738,7 @@ pub fn execute_cleanup(
                 Ok(()) => cleaned_count += 1,
                 Err(err) => {
                     eprintln!(
-                        "[orbit-file][cleanup] 强制删除失败 {} => {}",
+                        "[viap][cleanup] 强制删除失败 {} => {}",
                         path.display(),
                         err
                     );
@@ -808,7 +808,7 @@ fn resolve_uninstall_commands(input: &UninstallInput) -> Result<Vec<String>, Str
         }
         // registry_path 无有效命令时回退到 app_id 搜索，而非立即报错
         eprintln!(
-            "[orbit-file][uninstall] registry_path 无卸载命令，回退按 DisplayName 搜索: {}",
+            "[viap][uninstall] registry_path 无卸载命令，回退按 DisplayName 搜索: {}",
             registry_path
         );
     }
@@ -871,7 +871,7 @@ fn start_uninstall_process(uninstall_cmd: &str) -> Result<(), String> {
 
     let working_dir = derive_working_dir(&program);
     eprintln!(
-        "[orbit-file][uninstall] 直接启动: {} {} | cwd: {}",
+        "[viap][uninstall] 直接启动: {} {} | cwd: {}",
         program,
         args.join(" "),
         working_dir
@@ -887,7 +887,7 @@ fn start_uninstall_process(uninstall_cmd: &str) -> Result<(), String> {
             // 方案 B：权限不足时提权重试（唯一合理的回退路径）
             if is_elevation_required_error(&err) {
                 eprintln!(
-                    "[orbit-file][uninstall] 检测到权限提升需求，尝试提权执行: {} {}",
+                    "[viap][uninstall] 检测到权限提升需求，尝试提权执行: {} {}",
                     program,
                     args.join(" ")
                 );
@@ -960,7 +960,7 @@ fn spawn_elevated_and_wait(program: &str, args: &[String], working_dir: Option<&
     if !status.success() {
         let code = status.code().unwrap_or(-1);
         if code == 3010 {
-            eprintln!("[orbit-file][uninstall] 提权卸载需要重启，退出码: 3010");
+            eprintln!("[viap][uninstall] 提权卸载需要重启，退出码: 3010");
         } else {
             return Err(format!("提权执行卸载失败，退出码: {}", code));
         }
@@ -994,7 +994,7 @@ fn spawn_and_wait(program: &str, args: &[String], working_dir: Option<&Path>) ->
     if !status.success() {
         let exit_code = status.code().unwrap_or(-1);
         eprintln!(
-            "[orbit-file][uninstall] 进程退出: program={} code={} args={}",
+            "[viap][uninstall] 进程退出: program={} code={} args={}",
             program,
             exit_code,
             args.join(" ")
@@ -1002,7 +1002,7 @@ fn spawn_and_wait(program: &str, args: &[String], working_dir: Option<&Path>) ->
 
         // 退出码 3010 = 需要重启完成卸载，视为成功但记录日志
         if exit_code == 3010 {
-            eprintln!("[orbit-file][uninstall] 卸载需要重启，退出码: 3010");
+            eprintln!("[viap][uninstall] 卸载需要重启，退出码: 3010");
             return Ok(());
         }
         return Err(format!("卸载程序执行失败，退出码: {}", exit_code));
@@ -1786,7 +1786,7 @@ fn read_uninstall_commands_from_registry_path(path: &str) -> Vec<String> {
     let (hkey, sub_path) = match parse_registry_path(path) {
         Some(v) => v,
         None => {
-            eprintln!("[orbit-file][uninstall] 无法解析注册表路径: {}", path);
+            eprintln!("[viap][uninstall] 无法解析注册表路径: {}", path);
             return Vec::new();
         }
     };
@@ -1794,7 +1794,7 @@ fn read_uninstall_commands_from_registry_path(path: &str) -> Vec<String> {
         Ok(v) => v,
         Err(e) => {
             eprintln!(
-                "[orbit-file][uninstall] 打开注册表键失败: hive={:?} path={} error={}",
+                "[viap][uninstall] 打开注册表键失败: hive={:?} path={} error={}",
                 hkey, sub_path, e
             );
             return Vec::new();
@@ -1818,7 +1818,7 @@ fn read_uninstall_commands_from_registry_path(path: &str) -> Vec<String> {
 
     if cmds.is_empty() {
         eprintln!(
-            "[orbit-file][uninstall] 注册表键存在但无有效卸载命令: path={}",
+            "[viap][uninstall] 注册表键存在但无有效卸载命令: path={}",
             sub_path
         );
     }

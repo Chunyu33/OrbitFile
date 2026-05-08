@@ -43,7 +43,7 @@ function shortenPath(path: string): string {
 }
 
 // health cache
-const HEALTH_CACHE_KEY = 'orbitfile_health_cache';
+const HEALTH_CACHE_KEY = 'viap_health_cache';
 const HEALTH_CACHE_TTL = 5 * 60 * 1000;
 
 interface CachedHealth { status: LinkStatus; timestamp: number; }

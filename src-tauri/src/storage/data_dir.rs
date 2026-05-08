@@ -1,8 +1,8 @@
 // 数据目录管理模块
 //
 // 架构说明：
-// - 指针文件 %APPDATA%/orbit-file.json 记录实际数据目录路径（仅几十字节）
-// - 默认数据目录 %APPDATA%/orbit-file/（与旧版兼容）
+// - 指针文件 %APPDATA%/viap.json 记录实际数据目录路径（仅几十字节）
+// - 默认数据目录 %APPDATA%/viap/（与旧版兼容）
 // - 用户可在设置中修改数据目录，数据文件自动迁移
 // - 启动时检测数据目录是否存在，缺失则自动重建
 
@@ -11,10 +11,10 @@ use std::path::{Path, PathBuf};
 use crate::models::{DataDirConfig, CustomFolderEntry};
 
 /// 获取指针文件路径
-/// 指针文件始终位于 %APPDATA%/orbit-file.json
+/// 指针文件始终位于 %APPDATA%/viap.json
 pub fn get_config_path() -> PathBuf {
     let config_dir = dirs::config_dir().unwrap_or_else(|| PathBuf::from("."));
-    config_dir.join("orbit-file.json")
+    config_dir.join("viap.json")
 }
 
 /// 获取实际数据目录（读取指针文件 → 返回配置路径，或默认值）
@@ -32,7 +32,7 @@ pub fn get_data_dir() -> PathBuf {
     }
     // 默认路径（与旧版兼容）
     let appdata = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(appdata).join("orbit-file")
+    PathBuf::from(appdata).join("viap")
 }
 
 /// 确保数据目录存在，缺失则自动重建

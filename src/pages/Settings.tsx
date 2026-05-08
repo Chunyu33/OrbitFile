@@ -41,7 +41,7 @@ function formatSize(bytes: number): string {
 }
 
 const APP_INFO = {
-  name: 'OrbitFile',
+  name: 'Viap',
   description: 'Windows 应用管理与存储重定向工具',
   author: 'Evan Lau',
   email: 'liucygm33@gmail.com',
@@ -52,7 +52,7 @@ const ABOUT_ITEMS = [
   { label: '联系邮箱', value: APP_INFO.email, icon: Mail },
 ];
 
-const SETTINGS_KEY = 'orbitfile_settings';
+const SETTINGS_KEY = 'viap_settings';
 const DEFAULT_SETTINGS = { defaultTargetPath: 'D:\\Apps', useRecycleBin: true };
 
 function loadSettings() {

@@ -1,4 +1,4 @@
-// OrbitFile 数据模型定义
+// Viap 数据模型定义
 // 集中管理所有前后端共享的数据结构体、枚举和序列化类型
 
 use serde::{Deserialize, Serialize};
@@ -132,7 +132,7 @@ pub struct LargeFolderRestoreCompleteEvent {
 // 数据目录管理
 // ============================================================================
 
-/// 数据目录配置（存储在指针文件 %APPDATA%/orbit-file.json 中）
+/// 数据目录配置（存储在指针文件 %APPDATA%/viap.json 中）
 #[derive(Debug, Serialize, Deserialize)]
 pub struct DataDirConfig {
     pub data_dir: String,

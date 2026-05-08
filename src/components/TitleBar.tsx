@@ -50,7 +50,7 @@ export default function TitleBar({ centerContent, rightContent }: TitleBarProps)
           <img src={ICON} alt="" />
         </div>
         <span className="font-semibold text-[13px] tracking-tight" style={{ color: 'var(--text-primary)' }}>
-          OrbitFile
+          Viap
         </span>
       </div>
 

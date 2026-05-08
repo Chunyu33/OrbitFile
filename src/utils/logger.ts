@@ -3,7 +3,7 @@
 
 type LogLevel = 'info' | 'warn' | 'error';
 
-const PREFIX = '[orbit-file]';
+const PREFIX = '[viap]';
 
 function fmt(level: LogLevel, message: string, ...args: unknown[]) {
   const ts = new Date().toISOString();

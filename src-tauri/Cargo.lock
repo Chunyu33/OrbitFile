@@ -2781,29 +2781,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
-name = "orbit-file"
-version = "1.0.0"
-dependencies = [
- "base64 0.22.1",
- "dirs 5.0.1",
- "fs_extra",
- "image",
- "lazy_static",
- "rayon",
- "serde",
- "serde_json",
- "sysinfo",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "trash",
- "walkdir",
- "windows 0.58.0",
- "winreg 0.52.0",
-]
-
-[[package]]
 name = "ordered-stream"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5007,6 +4984,29 @@ name = "version_check"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
+
+[[package]]
+name = "viap"
+version = "1.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "dirs 5.0.1",
+ "fs_extra",
+ "image",
+ "lazy_static",
+ "rayon",
+ "serde",
+ "serde_json",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "trash",
+ "walkdir",
+ "windows 0.58.0",
+ "winreg 0.52.0",
+]
 
 [[package]]
 name = "vswhom"

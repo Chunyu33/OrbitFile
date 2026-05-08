@@ -1,4 +1,4 @@
-// OrbitFile 工具函数模块
+// Viap 工具函数模块
 // 提供跨模块共享的文件系统操作辅助函数
 
 use std::path::{Path, PathBuf};

@@ -1,6 +1,6 @@
 // 迁移历史记录持久化模块
 //
-// 持久化方案：JSON 文件存储，位于 %APPDATA%/orbit-file/migration_history.json
+// 持久化方案：JSON 文件存储，位于 %APPDATA%/viap/migration_history.json
 // 选择 JSON 而非 SQLite 的原因：
 // 1. 轻量级 — 无需额外依赖
 // 2. 可读性 — 用户可直接查看/编辑

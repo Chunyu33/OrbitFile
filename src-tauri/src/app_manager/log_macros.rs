@@ -4,7 +4,7 @@
 /// 日志级别标记：INFO / WARN / ERROR
 macro_rules! orbit_log {
     ($level:expr, $module:expr, $($arg:tt)*) => {
-        eprintln!("[orbit-file][{}][{}] {}", $level, $module, format!($($arg)*))
+        eprintln!("[viap][{}][{}] {}", $level, $module, format!($($arg)*))
     };
 }
 

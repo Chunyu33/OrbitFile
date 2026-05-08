@@ -269,7 +269,7 @@ export default function AppMigration() {
     // 读取用户设置的删除方式（默认移入回收站）
     let useRecycleBin = true;
     try {
-      const saved = JSON.parse(localStorage.getItem('orbitfile_settings') || '{}');
+      const saved = JSON.parse(localStorage.getItem('viap_settings') || '{}');
       useRecycleBin = saved.useRecycleBin !== false;
     } catch { /* use default */ }
 

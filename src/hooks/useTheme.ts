@@ -15,7 +15,7 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 export type ResolvedTheme = 'light' | 'dark';
 
 // localStorage 存储键名
-const THEME_STORAGE_KEY = 'orbitfile-theme';
+const THEME_STORAGE_KEY = 'viap-theme';
 
 // 获取系统主题偏好
 function getSystemTheme(): ResolvedTheme {

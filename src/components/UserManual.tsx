@@ -40,7 +40,7 @@ export default function UserManual({ isOpen, onClose }: UserManualProps) {
       {/* ==================== 1. 概述 ==================== */}
       <Section title="一、概述">
         <DocP>
-          OrbitFile 是一款 Windows 应用管理与存储重定向工具。它通过 <strong>NTFS 目录联结（Junction）</strong> 技术，
+          Viap 是一款 Windows 应用管理与存储重定向工具。它通过 <strong>NTFS 目录联结（Junction）</strong> 技术，
           将已安装的应用或大型数据文件夹从系统盘（通常是 C 盘）迁移到其他磁盘，同时在原始位置创建一个
           "重定向点"，使操作系统和应用本身都认为文件仍在原位。
         </DocP>
@@ -92,7 +92,7 @@ export default function UserManual({ isOpen, onClose }: UserManualProps) {
 
           <div className="rounded p-3 mb-3 text-[11px] leading-relaxed"
             style={{ background: 'var(--color-primary-light)', border: '1px solid var(--color-primary)' }}>
-            <strong style={{ color: 'var(--color-primary)' }}>OrbitFile Junction 的优势：</strong>
+            <strong style={{ color: 'var(--color-primary)' }}>Viap Junction 的优势：</strong>
             <ul className="list-disc pl-4 mt-1 space-y-0.5" style={{ color: 'var(--text-secondary)' }}>
               <li>适用于<strong>任意文件夹</strong>，包括已安装应用、游戏数据、聊天记录等</li>
               <li>文件系统级别的重定向，对所有程序透明，100% 兼容</li>
@@ -103,7 +103,7 @@ export default function UserManual({ isOpen, onClose }: UserManualProps) {
 
           <DocP>
             <strong>一句话总结：</strong>Windows 自带功能是"告诉系统文件夹换了个地方"，
-            OrbitFile 是"在文件系统底层做了一个透明的跳转"——后者更底层、更通用。
+            Viap 是"在文件系统底层做了一个透明的跳转"——后者更底层、更通用。
           </DocP>
         </div>
       </Section>
@@ -111,7 +111,7 @@ export default function UserManual({ isOpen, onClose }: UserManualProps) {
       {/* ==================== 3. 强力卸载 ==================== */}
       <Section title="三、强力卸载">
         <DocP>
-          OrbitFile 的卸载功能设计参考了 <strong>Geek Uninstaller</strong> 等专业卸载工具的标准流程，
+          Viap 的卸载功能设计参考了 <strong>Geek Uninstaller</strong> 等专业卸载工具的标准流程，
           比 Windows 自带的"设置 → 应用 → 卸载"更加彻底。
         </DocP>
 
@@ -154,7 +154,7 @@ export default function UserManual({ isOpen, onClose }: UserManualProps) {
           <ul className="list-disc pl-4 mt-1 space-y-0.5" style={{ color: 'var(--text-secondary)' }}>
             <li>Windows 自带卸载仅运行卸载程序，<strong>不进行残留扫描</strong></li>
             <li>许多应用卸载后会在 AppData 留下数 GB 的配置/缓存文件，Windows 不会提示</li>
-            <li>OrbitFile 在卸载后自动扫描三大数据目录 + 注册表，彻底清除残留</li>
+            <li>Viap 在卸载后自动扫描三大数据目录 + 注册表，彻底清除残留</li>
           </ul>
         </div>
 
@@ -198,7 +198,7 @@ export default function UserManual({ isOpen, onClose }: UserManualProps) {
           <li><strong>回滚能力：</strong>如果在任何阶段出错，可从备份恢复</li>
         </ul>
         <DocP>
-          <strong>建议：</strong>迁移重要数据前，建议先手动备份。虽然 OrbitFile 设计了完整的安全机制，
+          <strong>建议：</strong>迁移重要数据前，建议先手动备份。虽然 Viap 设计了完整的安全机制，
           但任何涉及文件操作的软件都无法完全排除意外情况（如突然断电、磁盘故障）。
         </DocP>
       </Section>
@@ -212,7 +212,7 @@ export default function UserManual({ isOpen, onClose }: UserManualProps) {
           </p>
           <ol className="list-decimal pl-5 space-y-1.5" style={{ color: 'var(--text-secondary)' }}>
             <li>
-              本软件（OrbitFile）是免费开源工具，按"现状"提供，不提供任何形式的明示或暗示担保。
+              本软件（Viap）是免费工具，按"现状"提供，不提供任何形式的明示或暗示担保。
             </li>
             <li>
               使用者应自行评估迁移操作的风险。本软件开发者对因使用本软件而导致的任何数据丢失、

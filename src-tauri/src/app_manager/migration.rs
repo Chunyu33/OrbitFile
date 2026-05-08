@@ -256,7 +256,7 @@ pub fn migrate_app(
         // 步骤 4: 备份原目录
         emit_progress(app_handle, 93.0, "linking", "正在创建目录链接...", source_size, source_size);
 
-        let backup_path = source_path.with_file_name(format!("{}_orbitfile_backup", folder_name));
+        let backup_path = source_path.with_file_name(format!("{}_viap_backup", folder_name));
         let backup_path_str = backup_path.to_string_lossy().to_string();
 
         fs::rename(source_path, &backup_path).map_err(|e| {

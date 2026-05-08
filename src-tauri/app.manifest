@@ -4,10 +4,10 @@
   <assemblyIdentity
     version="1.0.0.0"
     processorArchitecture="*"
-    name="com.chunyu.orbit-file"
+    name="com.chunyu.viap"
     type="win32"
   />
-  <description>OrbitFile - Windows 存储重定向工具</description>
+  <description>Viap - Windows 存储重定向工具</description>
   
   <!-- 请求管理员权限 -->
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
