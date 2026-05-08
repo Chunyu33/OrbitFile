@@ -2,6 +2,7 @@
 // 负责应用目录迁移、空间校验、进度上报、回滚与历史写入
 
 use std::fs;
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -64,10 +65,58 @@ fn emit_progress(
     });
 }
 
+/// 分块复制单个文件，在每 64KB 块之间检查取消标志
+/// 避免大文件（数 GB）的 fs::copy 阻塞期间无法取消和上报进度
+fn copy_file_with_cancel(
+    src: &Path,
+    dest: &Path,
+    cancel_flag: &Arc<AtomicBool>,
+) -> Result<u64, String> {
+    let file = fs::File::open(src)
+        .map_err(|e| format!("打开源文件失败 {}: {}", src.display(), e))?;
+    let file_size = file.metadata()
+        .map_err(|e| format!("读取文件元数据失败 {}: {}", src.display(), e))?
+        .len();
+
+    // 小文件（< 1MB）直接使用 fs::copy，免去分块开销
+    if file_size < 1024 * 1024 {
+        fs::copy(src, dest)
+            .map_err(|e| format!("复制文件失败 {}: {}", src.display(), e))?;
+        return Ok(file_size);
+    }
+
+    let mut reader = BufReader::with_capacity(64 * 1024, file);
+    let dest_file = fs::File::create(dest)
+        .map_err(|e| format!("创建目标文件失败 {}: {}", dest.display(), e))?;
+    let mut writer = BufWriter::with_capacity(64 * 1024, dest_file);
+    let mut buffer = [0u8; 64 * 1024];
+    let mut copied: u64 = 0;
+
+    loop {
+        if cancel_flag.load(Ordering::Relaxed) {
+            // 删除未完成的目标文件，避免残留
+            let _ = fs::remove_file(dest);
+            return Err("用户取消了迁移".to_string());
+        }
+        let bytes_read = reader.read(&mut buffer)
+            .map_err(|e| format!("读取文件失败 {} (已复制 {}/{}): {}", src.display(), copied, file_size, e))?;
+        if bytes_read == 0 {
+            break;
+        }
+        writer.write_all(&buffer[..bytes_read])
+            .map_err(|e| format!("写入文件失败 {}: {}", dest.display(), e))?;
+        copied += bytes_read as u64;
+    }
+    writer.flush()
+        .map_err(|e| format!("刷新文件缓冲区失败 {}: {}", dest.display(), e))?;
+
+    Ok(copied)
+}
+
 /// 带进度上报和取消支持的文件复制
 ///
-/// 替代 fs_extra::copy，逐个文件复制以便：
-/// 1. 在每个文件之间检查取消标志
+/// 替代 fs_extra::copy_items，逐个文件复制以便：
+/// 1. 在每个文件 / 每 64KB 之间检查取消标志
 /// 2. 按实际复制量上报进度百分比
 fn copy_dir_with_progress(
     source: &Path,
@@ -116,8 +165,8 @@ fn copy_dir_with_progress(
                 .map_err(|e| format!("创建目录失败 {}: {}", parent.display(), e))?;
         }
 
-        fs::copy(src, dest)
-            .map_err(|e| format!("复制文件失败 {}: {}", src.display(), e))?;
+        // 使用分块复制替代 fs::copy，确保大文件复制期间仍可取消
+        copy_file_with_cancel(src, dest, cancel_flag)?;
 
         copied_size += size;
 

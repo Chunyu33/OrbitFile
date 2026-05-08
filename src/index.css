@@ -74,6 +74,11 @@ input {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes fadeOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
@@ -84,9 +89,15 @@ input {
   to { opacity: 1; transform: scale(1); }
 }
 
+@keyframes modalOut {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: scale(0.96); }
+}
+
 .animate-fade-in { animation: fadeIn 0.15s ease-out; }
 .animate-spin { animation: spin 1s linear infinite; }
 .animate-modal-in { animation: modalIn 180ms ease-out; }
+.animate-modal-out { animation: modalOut 150ms ease-in forwards; }
 
 /* 主题切换过渡 */
 .theme-transition,

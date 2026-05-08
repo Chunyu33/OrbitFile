@@ -562,7 +562,7 @@ export default function AppMigration() {
     }
   }
 
-  // 关闭迁移弹窗
+  // 关闭迁移弹窗（成功/错误后的关闭）
   function handleCloseMigrationModal() {
     setMigrationModalOpen(false);
     setMigratingApp(null);
@@ -570,6 +570,24 @@ export default function AppMigration() {
     setMigrationMessage('');
     setMigrationProgress(0);
     setLockedProcesses([]);
+  }
+
+  // 迁移进行中点击 X → 二次确认后取消迁移并关闭弹窗
+  async function handleRequestCloseDuringMigration() {
+    const confirmed = await confirm(
+      '确定要取消当前迁移吗？\n\n已复制的文件将被清理，操作不可撤销。',
+      { title: '取消迁移', kind: 'warning', okLabel: '取消迁移', cancelLabel: '继续迁移' }
+    );
+    if (!confirmed) return;
+
+    // 发送取消信号给后端
+    try {
+      await invoke('cancel_migration');
+    } catch (error) {
+      logger.error('取消迁移失败:', error);
+    }
+    // 直接关闭弹窗，后端会自动回滚已复制内容
+    handleCloseMigrationModal();
   }
 
   // 批量选择处理
@@ -713,6 +731,7 @@ export default function AppMigration() {
         onCancel={handleCancelMigration}
         onForceContinue={handleForceContinue}
         onClose={handleCloseMigrationModal}
+        onRequestClose={handleRequestCloseDuringMigration}
       />
 
       {/* 强力卸载残留清理弹窗 */}

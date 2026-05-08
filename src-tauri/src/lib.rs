@@ -45,8 +45,10 @@ fn check_process_locks(source_path: String) -> Result<ProcessLockResult, String>
     app_manager::scanner::check_process_locks(source_path)
 }
 
+/// 应用迁移命令（异步）
+/// 使用 spawn_blocking 将密集 I/O 操作放到阻塞线程池，不阻塞异步运行时
 #[tauri::command]
-fn migrate_app(
+async fn migrate_app(
     app_name: String,
     source: String,
     target_parent: String,
@@ -54,10 +56,13 @@ fn migrate_app(
     app_handle: tauri::AppHandle,
 ) -> Result<MigrationResult, String> {
     state.cancel_flag.store(false, Ordering::SeqCst);
+    let cancel_flag = state.cancel_flag.clone();
     let source_clone = source.clone(); // 缓存更新需要旧路径引用
-    let result = app_manager::migration::migrate_app(
-        app_name, source, target_parent, &state.cancel_flag, &app_handle,
-    )?;
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        app_manager::migration::migrate_app(
+            app_name, source, target_parent, &cancel_flag, &app_handle,
+        )
+    }).await.map_err(|e| format!("迁移任务执行失败: {}", e))??;
     // 迁移成功后增量更新缓存，避免全量重扫
     if result.success {
         if let Some(ref new_path) = result.new_path {
@@ -67,8 +72,10 @@ fn migrate_app(
     Ok(result)
 }
 
+/// 特殊文件夹迁移命令（异步）
+/// 使用 spawn_blocking 将密集 I/O 操作放到阻塞线程池，不阻塞异步运行时
 #[tauri::command]
-fn migrate_special_folder(
+async fn migrate_special_folder(
     app_name: String,
     source_path: String,
     target_dir: String,
@@ -76,9 +83,12 @@ fn migrate_special_folder(
     app_handle: tauri::AppHandle,
 ) -> Result<MigrationResult, String> {
     state.cancel_flag.store(false, Ordering::SeqCst);
-    app_manager::detector::migrate_special_folder(
-        app_name, source_path, target_dir, &state.cancel_flag, &app_handle,
-    )
+    let cancel_flag = state.cancel_flag.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        app_manager::detector::migrate_special_folder(
+            app_name, source_path, target_dir, &cancel_flag, &app_handle,
+        )
+    }).await.map_err(|e| format!("迁移任务执行失败: {}", e))?
 }
 
 #[tauri::command]
