@@ -323,10 +323,40 @@ pub fn migrate_app(
         let backup_path = source_path.with_file_name(format!("{}_viap_backup", folder_name));
         let backup_path_str = backup_path.to_string_lossy().to_string();
 
-        fs::rename(source_path, &backup_path).map_err(|e| {
-            let _ = fs::remove_dir_all(&target_path);
-            format!("无法备份原目录: {}。请确保没有程序正在使用该目录。", e)
-        })?;
+        // 清理上一次失败残留的备份目录，避免 rename 时触发 ERROR_DIR_NOT_EMPTY
+        if backup_path.exists() {
+            let _ = fs::remove_dir_all(&backup_path);
+        }
+
+        // 尝试快速路径：同卷 rename（原子操作，0 开销）
+        match fs::rename(source_path, &backup_path) {
+            Ok(_) => {}
+            Err(e) => {
+                let _ = fs::remove_dir_all(&target_path);
+                let msg = match e.kind() {
+                    std::io::ErrorKind::PermissionDenied => format!(
+                        "无法备份原目录：权限不足 (拒绝访问)。\n\
+                         路径: {}\n\
+                         原因: 该目录位于系统保护区域（如 Program Files），重命名需要管理员权限。\n\
+                         请以管理员身份重新运行应用后重试。",
+                        source
+                    ),
+                    _ => format!(
+                        "无法备份原目录: {} (os error {})。\n\
+                         路径: {}\n\
+                         可能原因: 目录被其他程序占用或有残留文件，请重启后重试。",
+                        e,
+                        e.raw_os_error().unwrap_or(0),
+                        source
+                    ),
+                };
+                return Ok(MigrationResult {
+                    success: false,
+                    message: msg,
+                    new_path: None,
+                });
+            }
+        }
 
         // 步骤 5: 创建目录联接
         match symlink_dir(&target_path, source_path) {
