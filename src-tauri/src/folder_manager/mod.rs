@@ -272,6 +272,7 @@ pub fn migrate_large_folder(
     std::thread::spawn(move || {
         let result = crate::app_manager::migration::migrate_app(
             folder_name, source_path, target_dir, &cancel_flag, &handle,
+            crate::models::MigrationRecordType::LargeFolder,
         );
         let event = match result {
             Ok(r) => LargeFolderMigrationCompleteEvent {
@@ -381,7 +382,7 @@ fn restore_large_folder_inner(
     let target_path = PathBuf::from(target_str);
 
     // 步骤 1: 还原前检查目标盘空间
-    let file_size = fs_extra::dir::get_size(&target_path).unwrap_or(0);
+    let file_size = utils::get_dir_size_safe(&target_path);
     let original_parent = junction_path.parent()
         .ok_or("无法获取原路径的父目录")?;
     utils::check_disk_space_for_restore(original_parent, file_size)?;

@@ -15,8 +15,6 @@ use std::time::Instant;
 use crate::models::{InstalledApp, ProcessLockResult};
 use rayon::prelude::*;
 use sysinfo::System;
-#[cfg(windows)]
-use walkdir::WalkDir;
 
 // ============================================================================
 // 常量
@@ -85,10 +83,27 @@ impl AppScanner {
         let t2_ms = t2_start.elapsed().as_millis();
         orbit_log!("INFO", "scanner", "Tier2 LNK扫描完成: {} 个应用, {}ms", lnk_apps.len(), t2_ms);
 
-        let existing_paths: HashSet<String> = existing_paths
+        let mut existing_paths: HashSet<String> = existing_paths
             .into_iter()
             .chain(lnk_apps.iter().map(|a| normalize_path(&a.install_location)))
             .collect();
+        // 迁移后安装路径变为目录联接，将联接目标物理路径也加入已知集合
+        // 避免 Tier3 在目标盘重新发现同一应用导致重复条目
+        let symlink_targets: Vec<String> = existing_paths
+            .iter()
+            .filter_map(|p| {
+                let path = Path::new(p);
+                if path.is_symlink() {
+                    std::fs::read_link(path).ok()
+                        .map(|t| normalize_path(&t.to_string_lossy()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+        for target in symlink_targets {
+            existing_paths.insert(target);
+        }
         apps.extend(lnk_apps);
 
         // 提前终止：注册表覆盖足够多应用时仅跳过 Tier 3 文件系统扫描
@@ -205,8 +220,17 @@ impl AppScanner {
             if install_location.is_empty() {
                 continue;
             }
-            if !Path::new(&install_location).exists() {
-                continue;
+            // exists() 会跟随重解析点查询目标属性；目录联接（迁移后）若目标存在则通过
+            // 若返回 false 再通过 symlink_metadata 确认是否为联接本身存在但目标不可达的情况
+            let install_path = Path::new(&install_location);
+            if !install_path.exists() {
+                let is_symlink = install_path.symlink_metadata()
+                    .map(|m| m.file_type().is_symlink())
+                    .unwrap_or(false);
+                if !is_symlink {
+                    continue;
+                }
+                // 联接路径本身存在但目标暂不可达，保留该条目以便前端展示"已迁移"
             }
 
             let display_icon: String = subkey.get_value("DisplayIcon").unwrap_or_default();
@@ -1375,7 +1399,23 @@ fn scan_directory_constrained(
             continue;
         }
         if ft.is_symlink() {
-            continue;
+            // 迁移后的目录联接仍需检查是否为可识别应用
+            // 绿色软件（无注册表条目）仅靠 Tier3 发现，跳过会导致迁移后消失
+            let symlink_dir = entry.path();
+            if let Some(exe_path) = directory_looks_like_app(&symlink_dir) {
+                let dir_key = normalize_path(&symlink_dir.to_string_lossy());
+                if !existing_paths.contains(&dir_key) {
+                    let stem = exe_path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+                    if !has_version_pattern_in_stem(stem) {
+                        maybe_push_app(&symlink_dir, &exe_path, existing_paths, seen, out);
+                        // 将联接目标物理路径也加入 seen，防止 Tier3 在新盘重复发现
+                        if let Ok(target) = std::fs::read_link(&symlink_dir) {
+                            seen.insert(normalize_path(&target.to_string_lossy()));
+                        }
+                    }
+                }
+            }
+            continue; // 不递归进入联接内部，避免重复计算
         }
         scan_directory_constrained(
             &entry.path(),
@@ -1480,14 +1520,7 @@ fn dedup_subdirectory_apps(apps: &mut Vec<InstalledApp>) {
 /// 计算目录下所有文件的总大小（KB）
 #[cfg(windows)]
 fn compute_dir_size_kb(dir: &Path) -> u64 {
-    WalkDir::new(dir)
-        .into_iter()
-        .filter_map(|e| e.ok())
-        .filter_map(|entry| entry.metadata().ok())
-        .filter(|m| m.is_file())
-        .map(|m| m.len())
-        .sum::<u64>()
-        / 1024
+    crate::utils::get_dir_size_safe(dir) / 1024
 }
 
 // ============================================================================
@@ -1517,8 +1550,13 @@ pub fn get_app_size(install_location: String) -> Result<u64, String> {
     #[cfg(windows)]
     {
         let dir = Path::new(&install_location);
-        if !dir.exists() {
+        // 迁移后路径为目录联接，exists() 跟随重解析点到目标
+        // 若目标不可达但联接本身存在，仍允许计算大小（前端的容错逻辑会自动跳过）
+        if !dir.exists() && !dir.is_symlink() {
             return Err(format!("目录不存在: {}", install_location));
+        }
+        if !dir.exists() && dir.is_symlink() {
+            return Ok(0); // 联接目标暂时不可达，返回 0
         }
         Ok(compute_dir_size_kb(dir))
     }

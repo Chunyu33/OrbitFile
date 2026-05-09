@@ -61,6 +61,15 @@ pub fn get_or_scan() -> Result<Vec<InstalledApp>, String> {
 
     let mut apps = SCANNER.scan_all()?;
 
+    // 兜底：从迁移元数据补全扫描器遗漏的已迁移应用（如绿色软件）
+    // 仅补充扫描结果中不存在的路径，避免重复
+    let existing: std::collections::HashSet<String> = apps
+        .iter()
+        .map(|a| a.install_location.to_lowercase())
+        .collect();
+    let failsafe = crate::storage::migrated_app_metadata::generate_failsafe_apps(&existing);
+    apps.extend(failsafe);
+
     // 图标复用：路径未变的条目保留原有 Base64，减少 CPU 开销
     {
         let cache = APP_CACHE.read().unwrap();
@@ -95,17 +104,11 @@ pub fn refresh() -> Result<Vec<InstalledApp>, String> {
     get_or_scan()
 }
 
-/// 迁移成功后更新缓存：修改 install_location，重置 size 供后续异步计算
-pub fn on_app_migrated(old_path: &str, new_path: &str) {
+/// 迁移成功后标记缓存为脏，触发下轮全量扫描以同步最新注册表路径
+/// 不修改 install_location —— 目录联接使 OS 仍以原路径访问，迁移记录 key 也基于原路径
+pub fn on_app_migrated(_old_path: &str, _new_path: &str) {
     let mut cache = APP_CACHE.write().unwrap();
-    if let Some(app) = cache
-        .apps
-        .iter_mut()
-        .find(|a| a.install_location == old_path)
-    {
-        app.install_location = new_path.to_string();
-        app.estimated_size = 0; // 新路径大小待前端异步加载
-    }
+    cache.invalidate();
 }
 
 /// 卸载成功后从缓存中移除

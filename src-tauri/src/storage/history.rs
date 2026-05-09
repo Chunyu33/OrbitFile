@@ -230,6 +230,10 @@ pub fn clean_ghost_links() -> Result<CleanupResult, String> {
             record.status = "ghost_cleaned".to_string();
             cleaned_count += 1;
             cleaned_size += record.size;
+            // 同步移除兜底元数据
+            if record.record_type == MigrationRecordType::App {
+                crate::storage::migrated_app_metadata::remove_migrated_app(&record.original_path);
+            }
         }
     }
 
@@ -377,7 +381,7 @@ pub fn restore_app(history_id: String) -> Result<MigrationResult, String> {
         }
 
         // 步骤 3: 还原前空间检查
-        let file_size = fs_extra::dir::get_size(&target_path).unwrap_or(record.size);
+        let file_size = utils::get_dir_size_safe(&target_path);
         let original_parent = original_path.parent()
             .ok_or("无法获取原路径的父目录")?;
         utils::check_disk_space_for_restore(original_parent, file_size)?;
@@ -402,6 +406,9 @@ pub fn restore_app(history_id: String) -> Result<MigrationResult, String> {
         // 步骤 6: 更新记录
         storage.records[record_index].status = "restored".to_string();
         save_history(&storage)?;
+
+        // 同步移除兜底元数据，避免恢复后仍显示为"已迁移"
+        crate::storage::migrated_app_metadata::remove_migrated_app(&record.original_path);
 
         Ok(MigrationResult {
             success: true,

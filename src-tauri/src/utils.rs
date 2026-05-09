@@ -2,11 +2,11 @@
 // 提供跨模块共享的文件系统操作辅助函数
 
 use std::path::{Path, PathBuf};
-use fs_extra::dir::get_size;
 #[cfg(windows)]
 use std::fs;
 #[cfg(windows)]
 use sysinfo::Disks;
+use walkdir::WalkDir;
 
 /// 检测路径是否为 Junction（目录联接）
 ///
@@ -44,11 +44,24 @@ pub fn get_junction_target(path: &Path) -> Option<String> {
 #[cfg(not(windows))]
 pub fn get_junction_target(_path: &Path) -> Option<String> { None }
 
-/// 获取文件夹大小（递归计算）
-/// 使用 fs_extra 的 get_size，性能优于手动遍历
+/// 权限无关的目录大小计算
+///
+/// 使用 WalkDir 遍历，跳过无权限访问的文件/目录，只统计可读文件。
+/// 替代 fs_extra::get_size —— 后者在单个不可读条目上直接失败。
+pub fn get_dir_size_safe(path: &Path) -> u64 {
+    WalkDir::new(path)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
+}
+
+/// 获取文件夹大小（兼容旧接口，内部委托 get_dir_size_safe）
 pub fn get_folder_size(path: &Path) -> u64 {
     if path.exists() && path.is_dir() {
-        get_size(path).unwrap_or(0)
+        get_dir_size_safe(path)
     } else {
         0
     }

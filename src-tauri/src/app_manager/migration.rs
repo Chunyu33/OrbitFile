@@ -7,13 +7,13 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use fs_extra::dir::get_size;
 use serde::Serialize;
 use sysinfo::Disks;
 use tauri::Emitter;
 use walkdir::WalkDir;
 
 use crate::models::{MigrationRecordType, MigrationResult};
+use crate::utils;
 
 #[cfg(windows)]
 use std::os::windows::fs::symlink_dir;
@@ -40,7 +40,9 @@ fn get_available_space(path: &Path) -> u64 {
 
     for disk in disks.list() {
         let mount = disk.mount_point().to_string_lossy().to_uppercase();
-        if path_str.starts_with(&mount) || path_str.starts_with(&mount.replace("\\", "")) {
+        // 挂载点可能带尾随反斜杠（如 "C:\"），去除后与目标路径前缀匹配
+        let mount_clean = mount.trim_end_matches('\\');
+        if path_str.starts_with(mount_clean) {
             return disk.available_space();
         }
     }
@@ -65,23 +67,37 @@ fn emit_progress(
     });
 }
 
+
 /// 分块复制单个文件，在每 64KB 块之间检查取消标志
 /// 避免大文件（数 GB）的 fs::copy 阻塞期间无法取消和上报进度
+/// 权限拒绝时跳过该文件并返回 0，不中断整体迁移
 fn copy_file_with_cancel(
     src: &Path,
     dest: &Path,
     cancel_flag: &Arc<AtomicBool>,
 ) -> Result<u64, String> {
-    let file = fs::File::open(src)
-        .map_err(|e| format!("打开源文件失败 {}: {}", src.display(), e))?;
+    // 无法打开的文件（权限拒绝/被锁定）静默跳过，不中断整体迁移
+    let file = match fs::File::open(src) {
+        Ok(f) => f,
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            log_warn!("migration", "跳过无权限文件: {}", src.display());
+            return Ok(0);
+        }
+        Err(e) => return Err(format!("打开源文件失败 {}: {}", src.display(), e)),
+    };
     let file_size = file.metadata()
         .map_err(|e| format!("读取文件元数据失败 {}: {}", src.display(), e))?
         .len();
 
     // 小文件（< 1MB）直接使用 fs::copy，免去分块开销
     if file_size < 1024 * 1024 {
-        fs::copy(src, dest)
-            .map_err(|e| format!("复制文件失败 {}: {}", src.display(), e))?;
+        if let Err(e) = fs::copy(src, dest) {
+            if e.kind() == std::io::ErrorKind::PermissionDenied {
+                log_warn!("migration", "跳过无权限小文件: {}", src.display());
+                return Ok(0);
+            }
+            return Err(format!("复制文件失败 {}: {}", src.display(), e));
+        }
         return Ok(file_size);
     }
 
@@ -205,6 +221,7 @@ pub fn migrate_app(
     target_parent: String,
     cancel_flag: &Arc<AtomicBool>,
     app_handle: &tauri::AppHandle,
+    record_type: MigrationRecordType,
 ) -> Result<MigrationResult, String> {
     #[cfg(windows)]
     {
@@ -256,8 +273,7 @@ pub fn migrate_app(
         // 步骤 1: 空间检查
         emit_progress(app_handle, 0.0, "counting", "正在计算源文件夹大小...", 0, 0);
 
-        let source_size = get_size(source_path)
-            .map_err(|e| format!("无法计算源文件夹大小: {}", e))?;
+        let source_size = utils::get_dir_size_safe(source_path);
 
         let available_space = get_available_space(target_parent_path);
         // 1.2× 源大小 + 100MB 最小预留，避免目标盘被填满
@@ -285,8 +301,7 @@ pub fn migrate_app(
         // 步骤 3: 完整性校验
         emit_progress(app_handle, 90.0, "verifying", "正在校验文件完整性...", source_size, source_size);
 
-        let target_size = get_size(&target_path)
-            .map_err(|e| format!("无法计算目标文件夹大小: {}", e))?;
+        let target_size = utils::get_dir_size_safe(&target_path);
         let size_diff = (source_size as i64 - target_size as i64).abs();
         let tolerance = (source_size as f64 * 0.01) as i64;
 
@@ -324,14 +339,21 @@ pub fn migrate_app(
                 }
 
                 // 步骤 7: 写入迁移历史
+                let is_app = matches!(record_type, MigrationRecordType::App);
                 if let Err(e) = crate::storage::history::add_migration_record(
                     &app_name,
                     &source,
                     &target_path_str,
                     source_size,
-                    MigrationRecordType::App,
+                    record_type,
                 ) {
                     log_warn!("migration", "保存迁移记录失败: {}", e);
+                }
+                // 写入兜底元数据：仅对应用类型记录，确保扫描器遗漏时仍能识别
+                if is_app {
+                    crate::storage::migrated_app_metadata::add_migrated_app(
+                        &app_name, &source, &target_path_str,
+                    );
                 }
 
                 emit_progress(app_handle, 100.0, "done", "迁移完成", source_size, source_size);

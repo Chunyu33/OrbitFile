@@ -182,7 +182,15 @@ export default function AppMigration() {
 
   async function handleRefresh() {
     cachedSizeMap = null; // 应用列表已变更（迁移/卸载），强制重新计算大小
-    await Promise.all([fetchInstalledApps(), fetchAppMigrationRecords()]);
+    // 使用 refresh_apps 绕过缓存强刷注册表扫描，确保迁移后的目录联接路径与迁移记录一致
+    try {
+      const freshApps = await invoke<InstalledApp[]>('refresh_apps');
+      startTransition(() => setApps(freshApps));
+      loadAppSizes(freshApps);
+    } catch (error) {
+      logger.error('刷新应用列表失败:', error);
+    }
+    await fetchAppMigrationRecords();
   }
 
   // 手动刷新：清空后端缓存 + 前端大小缓存，强制全量扫描

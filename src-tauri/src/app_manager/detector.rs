@@ -3,11 +3,11 @@
 
 use std::path::{Path, PathBuf};
 
-use fs_extra::dir::get_size;
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
 use crate::models::MigrationResult;
+use crate::utils;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
@@ -118,7 +118,7 @@ pub fn migrate_special_folder(
     #[cfg(windows)]
     {
         ensure_app_not_running(&app_name)?;
-        crate::app_manager::migration::migrate_app(app_name, source_path, target_dir, cancel_flag, app_handle)
+        crate::app_manager::migration::migrate_app(app_name, source_path, target_dir, cancel_flag, app_handle, crate::models::MigrationRecordType::LargeFolder)
     }
 
     #[cfg(not(windows))]
@@ -139,7 +139,7 @@ fn normalize_app_name(app_name: &str) -> String {
 
 #[cfg(windows)]
 fn calc_size_mb(path: &Path) -> f64 {
-    let bytes = get_size(path).unwrap_or(0);
+    let bytes = utils::get_dir_size_safe(path);
     ((bytes as f64) / 1024.0 / 1024.0 * 100.0).round() / 100.0
 }
 
