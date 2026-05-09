@@ -7,6 +7,7 @@ use std::path::PathBuf;
 use std::fs;
 #[cfg(windows)]
 use std::os::windows::fs::symlink_dir;
+use std::sync::atomic::Ordering;
 use fs_extra::dir::{move_dir, CopyOptions};
 
 use tauri::{AppHandle, Emitter};
@@ -229,17 +230,16 @@ pub fn get_large_folders(app_handle: AppHandle) -> Result<Vec<LargeFolder>, Stri
 }
 
 /// 后台异步计算各文件夹大小并通过事件推送
+/// 始终推送事件（即使大小为 0），避免前端因缺少事件而永久显示 "--"
 fn compute_folder_sizes_async(app_handle: AppHandle, folders: Vec<LargeFolder>) {
     std::thread::spawn(move || {
         for folder in &folders {
             if !folder.exists || folder.is_junction { continue; }
             let path = PathBuf::from(&folder.path);
             let size = utils::get_folder_size(&path);
-            if size > 0 {
-                let _ = app_handle.emit("large-folder-size", LargeFolderSizeEvent {
-                    folder_id: folder.id.clone(), size,
-                });
-            }
+            let _ = app_handle.emit("large-folder-size", LargeFolderSizeEvent {
+                folder_id: folder.id.clone(), size,
+            });
         }
     });
 }
@@ -248,14 +248,19 @@ fn compute_folder_sizes_async(app_handle: AppHandle, folders: Vec<LargeFolder>) 
 // 大文件夹迁移与恢复
 // ============================================================================
 
-/// 迁移大文件夹（在后台线程执行，通过事件通知前端结果）
+/// 迁移大文件夹（async，复用 migrate_app 引擎，支持进度上报和取消）
+///
+/// 改为 async + spawn_blocking，与 migrate_app 命令行为一致：
+/// - 通过 migration-progress 事件实时上报进度
+/// - 支持 cancel_migration 取消
+/// - 直接返回 MigrationResult，前端无需监听完成事件
 #[tauri::command]
-pub fn migrate_large_folder(
+pub async fn migrate_large_folder(
     source_path: String,
     target_dir: String,
     state: tauri::State<'_, MigrationState>,
     app_handle: AppHandle,
-) -> Result<(), String> {
+) -> Result<MigrationResult, String> {
     let source = PathBuf::from(&source_path);
     if !source.exists() { return Err(format!("源路径不存在: {}", source_path)); }
     if !source.is_dir() { return Err("源路径必须是一个目录".to_string()); }
@@ -265,27 +270,18 @@ pub fn migrate_large_folder(
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "unknown".to_string());
 
-    state.cancel_flag.store(false, std::sync::atomic::Ordering::SeqCst);
+    state.cancel_flag.store(false, Ordering::SeqCst);
     let cancel_flag = state.cancel_flag.clone();
     let handle = app_handle.clone();
 
-    std::thread::spawn(move || {
-        let result = crate::app_manager::migration::migrate_app(
+    let result = tauri::async_runtime::spawn_blocking(move || {
+        crate::app_manager::migration::migrate_app(
             folder_name, source_path, target_dir, &cancel_flag, &handle,
-            crate::models::MigrationRecordType::LargeFolder,
-        );
-        let event = match result {
-            Ok(r) => LargeFolderMigrationCompleteEvent {
-                success: r.success, message: r.message, new_path: r.new_path,
-            },
-            Err(e) => LargeFolderMigrationCompleteEvent {
-                success: false, message: e, new_path: None,
-            },
-        };
-        let _ = handle.emit("large-folder-migration-complete", event);
-    });
+            MigrationRecordType::LargeFolder,
+        )
+    }).await.map_err(|e| format!("迁移线程异常: {}", e))?;
 
-    Ok(())
+    result
 }
 
 /// 添加自定义文件夹

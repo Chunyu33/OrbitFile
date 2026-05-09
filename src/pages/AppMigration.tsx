@@ -2,13 +2,14 @@
 // 实现完整的迁移流程：目录选择 -> 进程检测 -> 文件复制 -> 创建链接
 // 支持真实进度上报和取消操作
 
-import { useEffect, useState, useTransition, useContext } from 'react';
+import { useEffect, useState, useTransition, useCallback, useContext } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { confirm, open } from '@tauri-apps/plugin-dialog';
 import AppList from '../components/AppList';
 import MigrationModal from '../components/MigrationModal';
 import CleanupModal from '../components/CleanupModal';
+import TargetPickerDialog from '../components/TargetPickerDialog';
 import Toast, { useToast } from '../components/Toast';
 import { logger } from '../utils/logger';
 import { TabNavigationContext } from '../App';
@@ -47,29 +48,31 @@ function loadAppDefaultTarget(): string | null {
 /**
  * 解析迁移目录目录：优先使用默认设置，否则引导配置或手动选择
  * 返回选中的目标路径，null 表示用户取消操作
+ *
+ * 使用自定义 TargetPickerDialog 替代原生 confirm 弹窗，
+ * 以区分「使用默认」「自定义目录」和「X 关闭」三个独立操作。
  */
 async function resolveMigrationTarget(
   defaultPath: string | null,
   appName: string,
   navigateToSettings: ((tab: TabType) => void) | null,
+  showTargetPicker: (defaultPath: string, itemName: string) => Promise<'default' | 'custom' | null>,
 ): Promise<string | null> {
   if (defaultPath) {
-    // 有有效默认路径，让用户选择使用默认或自定义
-    const useDefault = await confirm(
-      `使用默认迁移目录：\n${defaultPath}\n\n应用 "${appName}" 将迁移到此目录。`,
-      { title: '迁移目录', kind: 'info', okLabel: '使用默认位置', cancelLabel: '自定义目录' },
-    );
-    if (useDefault) return defaultPath;
+    const action = await showTargetPicker(defaultPath, `应用 "${appName}" 将迁移到此目录`);
+    if (action === 'default') return defaultPath;
+    if (action === null) return null;
+    // action === 'custom' → 继续往下打开文件夹选择器
   } else {
-    // 无有效默认路径，引导前往设置或手动选择
+    // 无有效默认路径，引导前往设置
     const goSettings = await confirm(
       '未设置默认迁移目录。\n\n是否前往设置页进行配置？',
-      { title: '未配置迁移目录', kind: 'info', okLabel: '前往设置', cancelLabel: '自定义目录' },
+      { title: '未配置迁移目录', kind: 'info', okLabel: '前往设置', cancelLabel: '取消' },
     );
     if (goSettings) {
       navigateToSettings?.('settings');
-      return null;
     }
+    return null;
   }
 
   // 用户选择自定义目录
@@ -124,6 +127,24 @@ export default function AppMigration() {
 
   // 页面导航（跳转至设置页）
   const setActiveTab = useContext(TabNavigationContext);
+
+  // 自定义目标选择弹窗（区分 默认 / 自定义 / X 取消 三个操作）
+  const [pickerDialog, setPickerDialog] = useState<{
+    isOpen: boolean; defaultPath: string; itemName: string;
+    resolve: (action: 'default' | 'custom' | null) => void;
+  } | null>(null);
+
+  const showTargetPicker = useCallback(
+    (defaultPath: string, itemName: string): Promise<'default' | 'custom' | null> =>
+      new Promise((resolve) => {
+        // 包装 resolve：先清除 dialog 状态再 resolve，避免 isOpen 永为 true 导致死循环
+        setPickerDialog({
+          isOpen: true, defaultPath, itemName,
+          resolve: (action) => { setPickerDialog(null); resolve(action); }
+        });
+      }),
+    [],
+  );
 
   // 打开应用所在目录，失败时通过 Toast 反馈
   async function handleOpenFolder(app: InstalledApp) {
@@ -489,7 +510,7 @@ export default function AppMigration() {
   async function handleMigrate(app: InstalledApp) {
     // 步骤 1: 解析迁移目录（默认设置 / 引导设置 / 手动选择）
     const defaultTarget = loadAppDefaultTarget();
-    const targetDir = await resolveMigrationTarget(defaultTarget, app.display_name, setActiveTab);
+    const targetDir = await resolveMigrationTarget(defaultTarget, app.display_name, setActiveTab, showTargetPicker);
     if (!targetDir) return;
 
     // 初始化迁移状态
@@ -527,7 +548,7 @@ export default function AppMigration() {
     setLockedProcesses([]);
 
     const defaultTarget = loadAppDefaultTarget();
-    const targetDir = await resolveMigrationTarget(defaultTarget, migratingApp.display_name, setActiveTab);
+    const targetDir = await resolveMigrationTarget(defaultTarget, migratingApp.display_name, setActiveTab, showTargetPicker);
     if (!targetDir) return;
 
     await startCopyPhase(migratingApp, targetDir);
@@ -673,7 +694,7 @@ export default function AppMigration() {
 
     // 解析迁移目录（默认设置 / 引导设置 / 手动选择）
     const defaultTarget = loadAppDefaultTarget();
-    const targetDir = await resolveMigrationTarget(defaultTarget, '批量迁移', setActiveTab);
+    const targetDir = await resolveMigrationTarget(defaultTarget, '批量迁移', setActiveTab, showTargetPicker);
     if (!targetDir) return;
 
     const selectedApps = apps.filter((a) =>
@@ -794,6 +815,19 @@ export default function AppMigration() {
         onToggleItem={handleToggleLeftover}
         onConfirm={handleConfirmCleanup}
       />
+
+      {/* 迁移目标选择弹窗（区分 默认 / 自定义 / 取消） */}
+      {pickerDialog && (
+        <TargetPickerDialog
+          isOpen={pickerDialog.isOpen}
+          title="迁移目录"
+          defaultPath={pickerDialog.defaultPath}
+          itemName={pickerDialog.itemName}
+          onUseDefault={() => pickerDialog.resolve('default')}
+          onUseCustom={() => pickerDialog.resolve('custom')}
+          onClose={() => pickerDialog.resolve(null)}
+        />
+      )}
 
       {/* Toast 通知 */}
       <Toast

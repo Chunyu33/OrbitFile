@@ -20,6 +20,8 @@ interface MigrationModalProps {
   message: string;
   lockedProcesses: string[];
   progress: number;
+  /** 弹窗标题，默认 "应用迁移" */
+  title?: string;
   onCancel?: () => void;
   onForceContinue?: () => void;
   onClose: () => void;
@@ -45,6 +47,7 @@ export default function MigrationModal({
   message,
   lockedProcesses,
   progress,
+  title = '应用迁移',
   onCancel,
   onForceContinue,
   onClose,
@@ -122,7 +125,7 @@ export default function MigrationModal({
           style={{ borderBottom: '1px solid var(--border-color)' }}
         >
           <h2 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>
-            应用迁移
+            {title}
           </h2>
           <button
             onClick={canClose ? handleAnimatedClose : onRequestClose}

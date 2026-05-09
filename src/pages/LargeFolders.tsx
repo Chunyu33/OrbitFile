@@ -7,16 +7,18 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open, confirm } from '@tauri-apps/plugin-dialog';
 import {
   RefreshCw, FolderOpen, AlertTriangle,
-  Link2, Undo2, Plus, X, Loader2,
+  Link2, Undo2, Plus, X, Loader2, Check,
   Monitor, FileText, Download, Image, Video,
-  MessageCircle, Building2, Users, Phone, Bird, Globe, Code, Package,
+  MessageCircle, Building2, Users, Phone, Bird, Globe, Code, Package, ArrowRightLeft,
 } from 'lucide-react';
 import Toast, { useToast } from '../components/Toast';
 import EmptyState from '../components/EmptyState';
+import MigrationModal from '../components/MigrationModal';
+import TargetPickerDialog from '../components/TargetPickerDialog';
 import {
   LargeFolder, ProcessLockResult, LargeFolderSizeEvent,
-  LargeFolderMigrationCompleteEvent, LargeFolderRestoreCompleteEvent,
-  TabType,
+  LargeFolderRestoreCompleteEvent, MigrationProgressEvent,
+  MigrationResult, MigrationStep, TabType,
 } from '../types';
 import { TabNavigationContext } from '../App';
 
@@ -66,26 +68,34 @@ function loadDataDefaultTarget(): string | null {
  * 解析数据迁移目录目录：优先使用默认设置，否则引导配置或手动选择
  * 返回选中的目标路径，null 表示用户取消操作
  */
+/**
+ * 解析数据迁移目标目录：优先使用默认设置，否则引导配置或手动选择
+ * 返回选中的目标路径，null 表示用户取消操作
+ *
+ * 使用自定义 TargetPickerDialog 替代原生 confirm 弹窗，
+ * 以区分「使用默认」「自定义目录」和「X 关闭」三个独立操作。
+ */
 async function resolveDataMigrationTarget(
   defaultPath: string | null,
   folderName: string,
   navigateToSettings: ((tab: TabType) => void) | null,
+  showTargetPicker: (defaultPath: string, itemName: string) => Promise<'default' | 'custom' | null>,
 ): Promise<string | null> {
   if (defaultPath) {
-    const useDefault = await confirm(
-      `使用默认迁移目录：\n${defaultPath}\n\n文件夹 "${folderName}" 将迁移到此目录。`,
-      { title: '迁移目录', kind: 'info', okLabel: '使用默认位置', cancelLabel: '自定义目录' },
-    );
-    if (useDefault) return defaultPath;
+    const action = await showTargetPicker(defaultPath, `文件夹 "${folderName}" 将迁移到此目录`);
+    if (action === 'default') return defaultPath;
+    if (action === null) return null;
+    // action === 'custom' → 继续往下打开文件夹选择器
   } else {
+    // 无有效默认路径，引导前往设置
     const goSettings = await confirm(
       '未设置默认迁移目录。\n\n是否前往设置页进行配置？',
-      { title: '未配置迁移目录', kind: 'info', okLabel: '前往设置', cancelLabel: '自定义目录' },
+      { title: '未配置迁移目录', kind: 'info', okLabel: '前往设置', cancelLabel: '取消' },
     );
     if (goSettings) {
       navigateToSettings?.('settings');
-      return null;
     }
+    return null;
   }
 
   // 用户选择自定义目录
@@ -157,6 +167,7 @@ function RiskConfirmModal({
 function FolderRow({
   folder, onMigrate, onRestore, onOpenFolder, onRemove,
   isMigrating, isRestoring,
+  showCheckbox, isSelected, onToggleSelect,
 }: {
   folder: LargeFolder;
   onMigrate: (f: LargeFolder) => void;
@@ -165,6 +176,9 @@ function FolderRow({
   onRemove?: (f: LargeFolder) => void;
   isMigrating?: boolean;
   isRestoring?: boolean;
+  showCheckbox?: boolean;
+  isSelected?: boolean;
+  onToggleSelect?: (f: LargeFolder) => void;
 }) {
   const notFound = !folder.exists;
   const isSystem = folder.folder_type === 'System';
@@ -184,6 +198,22 @@ function FolderRow({
       onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.background = 'var(--bg-row-hover)'; }}
       onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = 'transparent'; }}
     >
+      {/* 批量选择复选框 — 已迁移文件夹不显示 */}
+      {showCheckbox && !folder.is_junction && (
+        <div
+          className="flex items-center justify-center w-4 h-4 rounded border cursor-pointer flex-shrink-0"
+          style={{
+            borderColor: isSelected ? 'var(--color-primary)' : 'var(--border-color-strong)',
+            background: isSelected ? 'var(--color-primary)' : 'transparent',
+          }}
+          onClick={(e) => { e.stopPropagation(); onToggleSelect?.(folder); }}
+        >
+          {isSelected && <Check className="w-3 h-3" style={{ color: '#fff' }} />}
+        </div>
+      )}
+      {showCheckbox && folder.is_junction && (
+        <div className="w-4 h-4 flex-shrink-0" />
+      )}
       {/* icon */}
       <div className="w-7 h-7 rounded flex items-center justify-center flex-shrink-0" style={{ color: 'var(--text-secondary)' }}>
         {getFolderIcon(folder.icon_id)}
@@ -249,16 +279,48 @@ export default function LargeFolders() {
   const [folders, setFolders] = useState<LargeFolder[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [confirmModal, setConfirmModal] = useState<{
+  const [restoringFolderId, setRestoringFolderId] = useState<string | null>(null);
+
+  // 迁移进度弹窗状态
+  const [migrationModalOpen, setMigrationModalOpen] = useState(false);
+  const [migrationStep, setMigrationStep] = useState<MigrationStep>('idle');
+  const [migratingFolder, setMigratingFolder] = useState<LargeFolder | null>(null);
+  const [migrationMessage, setMigrationMessage] = useState('');
+  const [migrationProgress, setMigrationProgress] = useState(0);
+  const [lockedProcesses, setLockedProcesses] = useState<string[]>([]);
+
+  // 批量迁移状态
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
+  const [batchMigrating, setBatchMigrating] = useState(false);
+  const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
+
+  // 系统文件夹风险确认弹窗（仅 System 类型显示）
+  const [riskConfirm, setRiskConfirm] = useState<{
     isOpen: boolean; folder: LargeFolder | null; targetDir: string | null;
   }>({ isOpen: false, folder: null, targetDir: null });
-  const [migratingFolderId, setMigratingFolderId] = useState<string | null>(null);
-  const [restoringFolderId, setRestoringFolderId] = useState<string | null>(null);
 
   const { toast, showToast, hideToast } = useToast();
 
   // 页面导航（跳转至设置页）
   const setActiveTab = useContext(TabNavigationContext);
+
+  // 自定义目标选择弹窗（区分 默认 / 自定义 / X 取消 三个操作）
+  const [pickerDialog, setPickerDialog] = useState<{
+    isOpen: boolean; defaultPath: string; itemName: string;
+    resolve: (action: 'default' | 'custom' | null) => void;
+  } | null>(null);
+
+  const showTargetPicker = useCallback(
+    (defaultPath: string, itemName: string): Promise<'default' | 'custom' | null> =>
+      new Promise((resolve) => {
+        // 包装 resolve：先清除 dialog 状态再 resolve，避免 isOpen 永为 true 导致死循环
+        setPickerDialog({
+          isOpen: true, defaultPath, itemName,
+          resolve: (action) => { setPickerDialog(null); resolve(action); }
+        });
+      }),
+    [],
+  );
 
   const totalReclaimable = useMemo(
     () => folders.filter(f => !f.is_junction && f.exists).reduce((s, f) => s + f.size, 0),
@@ -291,21 +353,26 @@ export default function LargeFolders() {
     return () => { if (unlisten) unlisten(); };
   }, []);
 
-  // migration complete events
+  // 迁移进度事件（复用 engine 层的 migration-progress，与 AppMigration 共享取消标志）
   useEffect(() => {
     let unlisten: UnlistenFn | null = null;
     (async () => {
       try {
-        unlisten = await listen<LargeFolderMigrationCompleteEvent>('large-folder-migration-complete', (event) => {
-          const { success, message } = event.payload;
-          setMigratingFolderId(null);
-          if (success) { showToast(message, 'success'); fetchFolders(); }
-          else { showToast(message, 'error'); }
+        unlisten = await listen<MigrationProgressEvent>('migration-progress', (event) => {
+          const data = event.payload;
+          setMigrationProgress(data.percent);
+          switch (data.step) {
+            case 'counting': setMigrationStep('counting'); break;
+            case 'copying': setMigrationStep('copying'); break;
+            case 'verifying': setMigrationStep('verifying'); break;
+            case 'linking': setMigrationStep('linking'); break;
+          }
+          setMigrationMessage(data.message);
         });
       } catch { /* ignore */ }
     })();
     return () => { if (unlisten) unlisten(); };
-  }, [showToast, fetchFolders]);
+  }, []);
 
   // restore complete events
   useEffect(() => {
@@ -332,12 +399,35 @@ export default function LargeFolders() {
     catch (error) { console.error('打开文件夹失败:', error); showToast('打开文件夹失败', 'error'); }
   }
 
+  // 判断文件夹是否已迁移（Junction 状态）
+  const isFolderMigrated = useCallback((f: LargeFolder) => f.is_junction, []);
+
+  // 选择/取消选择文件夹
+  function handleToggleSelect(folder: LargeFolder) {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(folder.id)) next.delete(folder.id);
+      else next.add(folder.id);
+      return next;
+    });
+  }
+
+  function handleSelectAll() {
+    const selectable = folders.filter((f) => !isFolderMigrated(f));
+    setSelectedKeys((prev) => {
+      if (prev.size === selectable.length) return new Set();
+      return new Set(selectable.map((f) => f.id));
+    });
+  }
+
   async function handleMigrate(folder: LargeFolder) {
+    // 步骤 1: 进程锁检查
     try {
       const lockResult = await invoke<ProcessLockResult>('check_process_locks', { sourcePath: folder.path });
       if (lockResult.is_locked) {
         const isSystem = folder.folder_type === 'System';
         if (isSystem) {
+          // 系统文件夹被占用时仅警告，允许强制继续
           const proceed = await confirm(
             `以下系统进程正在使用 "${folder.display_name}"：\n${lockResult.processes.join(', ')}\n\n强制继续？`,
             { title: '进程占用警告', kind: 'warning', okLabel: '强制继续', cancelLabel: '取消' }
@@ -348,29 +438,161 @@ export default function LargeFolders() {
           return;
         }
       }
-    } catch { /* non-critical */ }
+    } catch { /* 进程检测非关键，失败不阻塞 */ }
 
-    // 解析迁移目录（默认设置 / 引导设置 / 手动选择）
+    // 步骤 2: 解析迁移目标
     const defaultTarget = loadDataDefaultTarget();
-    const targetDir = await resolveDataMigrationTarget(defaultTarget, folder.display_name, setActiveTab);
+    const targetDir = await resolveDataMigrationTarget(defaultTarget, folder.display_name, setActiveTab, showTargetPicker);
     if (!targetDir) return;
 
-    setConfirmModal({ isOpen: true, folder, targetDir });
+    // 步骤 3: 系统文件夹先弹出风险确认弹窗
+    if (folder.folder_type === 'System') {
+      setRiskConfirm({ isOpen: true, folder, targetDir });
+    } else {
+      await startFolderMigration(folder, targetDir);
+    }
   }
 
-  async function confirmMigrate() {
-    const { folder, targetDir } = confirmModal;
+  /** 风险确认弹窗确认回调：关闭弹窗后启动迁移 */
+  async function handleRiskConfirm() {
+    const { folder, targetDir } = riskConfirm;
     if (!folder || !targetDir) return;
-    setConfirmModal({ isOpen: false, folder: null, targetDir: null });
-    setMigratingFolderId(folder.id);
-    showToast(`正在迁移 ${folder.display_name}...`, 'info');
+    setRiskConfirm({ isOpen: false, folder: null, targetDir: null });
+    await startFolderMigration(folder, targetDir);
+  }
+
+  /** 启动文件夹迁移，打开进度弹窗并监听进度事件 */
+  async function startFolderMigration(folder: LargeFolder, targetDir: string) {
+    setMigratingFolder(folder);
+    setMigrationModalOpen(true);
+    setMigrationStep('checking');
+    setMigrationMessage('');
+    setMigrationProgress(0);
+    setLockedProcesses([]);
 
     try {
-      await invoke('migrate_large_folder', { sourcePath: folder.path, targetDir });
+      const result = await invoke<MigrationResult>('migrate_large_folder', {
+        sourcePath: folder.path,
+        targetDir,
+      });
+
+      if (result.success) {
+        setMigrationStep('success');
+        setMigrationProgress(100);
+        setMigrationMessage(result.message);
+        showToast('迁移成功！', 'success');
+        await fetchFolders();
+      } else {
+        setMigrationStep('error');
+        setMigrationMessage(result.message);
+      }
     } catch (error) {
-      setMigratingFolderId(null);
-      showToast(`迁移失败: ${error}`, 'error');
+      const errStr = String(error);
+      setMigrationStep('error');
+      setMigrationMessage(
+        errStr.includes('用户取消了迁移')
+          ? '迁移已被取消'
+          : `迁移过程中发生错误: ${error}`
+      );
     }
+  }
+
+  /** 取消当前迁移 */
+  async function handleCancelMigration() {
+    try {
+      await invoke('cancel_migration');
+      showToast('正在取消迁移...', 'info');
+    } catch (error) {
+      console.error('取消迁移失败:', error);
+    }
+  }
+
+  /** 关闭迁移弹窗 */
+  function handleCloseMigrationModal() {
+    setMigrationModalOpen(false);
+    setMigratingFolder(null);
+    setMigrationStep('idle');
+    setMigrationMessage('');
+    setMigrationProgress(0);
+    setLockedProcesses([]);
+  }
+
+  /** 迁移进行中点击 X → 二次确认后取消 */
+  async function handleRequestCloseDuringMigration() {
+    const confirmed = await confirm(
+      '确定要取消当前迁移吗？\n\n已复制的文件将被清理，操作不可撤销。',
+      { title: '取消迁移', kind: 'warning', okLabel: '取消迁移', cancelLabel: '继续迁移' }
+    );
+    if (!confirmed) return;
+    try { await invoke('cancel_migration'); } catch { /* ignore */ }
+    handleCloseMigrationModal();
+  }
+
+  /** 批量迁移：依次迁移每个选中的文件夹 */
+  async function handleBatchMigrate() {
+    if (selectedKeys.size === 0) return;
+
+    const defaultTarget = loadDataDefaultTarget();
+    const targetDir = await resolveDataMigrationTarget(defaultTarget, '批量迁移', setActiveTab, showTargetPicker);
+    if (!targetDir) return;
+
+    const selectedFolders = folders.filter((f) => selectedKeys.has(f.id));
+    if (selectedFolders.length === 0) return;
+
+    const confirmed = await confirm(
+      `即将批量迁移 ${selectedFolders.length} 个文件夹到：\n${targetDir}\n\n是否继续？`,
+      { title: '确认批量迁移', kind: 'warning', okLabel: '开始迁移', cancelLabel: '取消' }
+    );
+    if (!confirmed) return;
+
+    setBatchMigrating(true);
+    setBatchProgress({ current: 0, total: selectedFolders.length });
+    setSelectedKeys(new Set());
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < selectedFolders.length; i++) {
+      const folder = selectedFolders[i];
+      setBatchProgress({ current: i + 1, total: selectedFolders.length });
+
+      try {
+        // 进程锁检查
+        try {
+          const lockResult = await invoke<ProcessLockResult>('check_process_locks', { sourcePath: folder.path });
+          if (lockResult.is_locked) {
+            showToast(`${folder.display_name}: 文件被占用，跳过`, 'error');
+            failCount++;
+            continue;
+          }
+        } catch { /* 非关键 */ }
+
+        const result = await invoke<MigrationResult>('migrate_large_folder', {
+          sourcePath: folder.path,
+          targetDir,
+        });
+
+        if (result.success) {
+          successCount++;
+        } else {
+          showToast(`${folder.display_name}: ${result.message}`, 'error');
+          failCount++;
+        }
+      } catch (error) {
+        showToast(`${folder.display_name}: ${error}`, 'error');
+        failCount++;
+      }
+    }
+
+    setBatchMigrating(false);
+    setBatchProgress({ current: 0, total: 0 });
+
+    if (failCount === 0) {
+      showToast(`批量迁移完成：${successCount} 个全部成功`, 'success');
+    } else {
+      showToast(`批量迁移完成：${successCount} 成功, ${failCount} 失败`, 'info');
+    }
+    await fetchFolders();
   }
 
   async function handleRestore(folder: LargeFolder) {
@@ -429,6 +651,27 @@ export default function LargeFolders() {
                 已迁移 <strong style={{ color: 'var(--color-success)' }}>{migratedCount}</strong> 个
               </span>
             )}
+            {/* 批量操作 */}
+            <button
+              onClick={handleSelectAll}
+              className="text-[11px] cursor-pointer"
+              style={{ color: 'var(--color-primary)', background: 'none', border: 'none' }}
+            >
+              {selectedKeys.size > 0 ? '取消全选' : '全选未迁移'}
+            </button>
+            {selectedKeys.size > 0 && (
+              <button
+                onClick={handleBatchMigrate}
+                disabled={batchMigrating}
+                className="btn btn-primary btn-sm h-7 text-[11px]"
+                style={{ visibility: selectedKeys.size === 0 ? 'hidden' : 'visible' }}
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                {batchMigrating
+                  ? `迁移中 ${batchProgress.current}/${batchProgress.total}`
+                  : `批量迁移 (${selectedKeys.size})`}
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button onClick={handleAddCustomFolder} className="btn h-7 text-[12px]">
@@ -469,7 +712,8 @@ export default function LargeFolders() {
                   </div>
                   {systemFolders.map(f => (
                     <FolderRow key={f.id} folder={f} onMigrate={handleMigrate} onRestore={handleRestore}
-                      onOpenFolder={openFolder} isMigrating={migratingFolderId === f.id} isRestoring={restoringFolderId === f.id} />
+                      onOpenFolder={openFolder} isMigrating={migratingFolder?.id === f.id} isRestoring={restoringFolderId === f.id}
+                      showCheckbox isSelected={selectedKeys.has(f.id)} onToggleSelect={handleToggleSelect} />
                   ))}
                 </section>
               )}
@@ -481,7 +725,8 @@ export default function LargeFolders() {
                   </div>
                   {appDataFolders.map(f => (
                     <FolderRow key={f.id} folder={f} onMigrate={handleMigrate} onRestore={handleRestore}
-                      onOpenFolder={openFolder} isMigrating={migratingFolderId === f.id} isRestoring={restoringFolderId === f.id} />
+                      onOpenFolder={openFolder} isMigrating={migratingFolder?.id === f.id} isRestoring={restoringFolderId === f.id}
+                      showCheckbox isSelected={selectedKeys.has(f.id)} onToggleSelect={handleToggleSelect} />
                   ))}
                 </section>
               )}
@@ -494,7 +739,8 @@ export default function LargeFolders() {
                   {customFolders.map(f => (
                     <FolderRow key={f.id} folder={f} onMigrate={handleMigrate} onRestore={handleRestore}
                       onOpenFolder={openFolder} onRemove={handleRemoveCustomFolder}
-                      isMigrating={migratingFolderId === f.id} isRestoring={restoringFolderId === f.id} />
+                      isMigrating={migratingFolder?.id === f.id} isRestoring={restoringFolderId === f.id}
+                      showCheckbox isSelected={selectedKeys.has(f.id)} onToggleSelect={handleToggleSelect} />
                   ))}
                 </section>
               )}
@@ -503,9 +749,36 @@ export default function LargeFolders() {
         </div>
       </div>
 
-      <RiskConfirmModal isOpen={confirmModal.isOpen} folder={confirmModal.folder}
-        onConfirm={confirmMigrate}
-        onCancel={() => setConfirmModal({ isOpen: false, folder: null, targetDir: null })} />
+      <RiskConfirmModal isOpen={riskConfirm.isOpen} folder={riskConfirm.folder}
+        onConfirm={handleRiskConfirm}
+        onCancel={() => setRiskConfirm({ isOpen: false, folder: null, targetDir: null })} />
+
+      {/* 迁移目标选择弹窗（区分 默认 / 自定义 / 取消） */}
+      {pickerDialog && (
+        <TargetPickerDialog
+          isOpen={pickerDialog.isOpen}
+          title="迁移目录"
+          defaultPath={pickerDialog.defaultPath}
+          itemName={pickerDialog.itemName}
+          onUseDefault={() => pickerDialog.resolve('default')}
+          onUseCustom={() => pickerDialog.resolve('custom')}
+          onClose={() => pickerDialog.resolve(null)}
+        />
+      )}
+
+      {/* 迁移进度弹窗 */}
+      <MigrationModal
+        isOpen={migrationModalOpen}
+        step={migrationStep}
+        appName={migratingFolder?.display_name || ''}
+        message={migrationMessage}
+        lockedProcesses={lockedProcesses}
+        progress={migrationProgress}
+        title="数据迁移"
+        onCancel={handleCancelMigration}
+        onClose={handleCloseMigrationModal}
+        onRequestClose={handleRequestCloseDuringMigration}
+      />
 
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
     </div>

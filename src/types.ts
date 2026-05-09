@@ -161,16 +161,6 @@ export interface LargeFolderSizeEvent {
 }
 
 /**
- * 大文件夹迁移完成事件
- * 迁移在后台线程执行，完成后通过 "large-folder-migration-complete" 事件推送
- */
-export interface LargeFolderMigrationCompleteEvent {
-  success: boolean;
-  message: string;
-  new_path: string | null;
-}
-
-/**
  * 大文件夹恢复完成事件
  * 恢复在后台线程执行，完成后通过 "large-folder-restore-complete" 事件推送
  */
