@@ -10,12 +10,13 @@ import {
   FolderCog, ChevronRight, User, Mail,
   FolderArchive, Trash2,
   AppWindow, Loader2, Sun, Moon, Monitor, Database,
-  Github, Video, ExternalLink, BookOpen,
+  Github, Video, ExternalLink, BookOpen, Heart,
 } from 'lucide-react';
 import { useThemeContext } from '../App';
 import type { ThemeMode } from '../hooks/useTheme';
 import Toast, { useToast } from '../components/Toast';
 import UserManual from '../components/UserManual';
+import DonateModal from '../components/DonateModal';
 import type { DataDirConfig, GhostLinkPreview } from '../types';
 
 interface MigrationStats {
@@ -114,6 +115,7 @@ export default function Settings() {
   const [ghostPreview, setGhostPreview] = useState<GhostLinkPreview | null>(null);
   const [ghostScanning, setGhostScanning] = useState(false);
   const [manualOpen, setManualOpen] = useState(false);
+  const [donateModalOpen, setDonateModalOpen] = useState(false);
   const [appVersion, setAppVersion] = useState('...');
   const [dataDir, setDataDir] = useState('');
   const [dataDirLoading, setDataDirLoading] = useState(false);
@@ -488,6 +490,22 @@ export default function Settings() {
                 <ExternalLink className="w-3 h-3" style={{ color: 'var(--text-tertiary)' }} />
               </div>
             </a>
+            {/* 支持作者 */}
+            <button
+              onClick={() => setDonateModalOpen(true)}
+              className="setting-item w-full text-left"
+              style={{ padding: '10px 14px', cursor: 'pointer' }}>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded flex items-center justify-center" style={{ background: 'var(--color-danger-light)' }}>
+                  <Heart className="w-4 h-4" style={{ color: 'var(--color-danger)' }} />
+                </div>
+                <div>
+                  <p className="setting-label">支持作者</p>
+                  <p className="setting-desc">如果 Viap 帮到了你，欢迎请我喝杯咖啡</p>
+                </div>
+              </div>
+              <ChevronRight className="w-3.5 h-3.5" style={{ color: 'var(--text-tertiary)' }} />
+            </button>
           </div>
         </section>
 
@@ -498,6 +516,7 @@ export default function Settings() {
       </div>
 
       <UserManual isOpen={manualOpen} onClose={() => setManualOpen(false)} />
+      <DonateModal isOpen={donateModalOpen} onClose={() => setDonateModalOpen(false)} />
       <Toast message={toast.message} type={toast.type} visible={toast.visible} onClose={hideToast} />
     </div>
   );
