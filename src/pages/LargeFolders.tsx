@@ -1,7 +1,7 @@
 // 数据迁移页面 — 桌面工具风格
 // 紧凑行布局，弱化操作视觉
 
-import { useEffect, useState, useMemo, useCallback } from 'react';
+import { useEffect, useState, useMemo, useCallback, useContext } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { open, confirm } from '@tauri-apps/plugin-dialog';
@@ -16,7 +16,9 @@ import EmptyState from '../components/EmptyState';
 import {
   LargeFolder, ProcessLockResult, LargeFolderSizeEvent,
   LargeFolderMigrationCompleteEvent, LargeFolderRestoreCompleteEvent,
+  TabType,
 } from '../types';
+import { TabNavigationContext } from '../App';
 
 function formatSize(bytes: number): string {
   if (bytes === 0) return '--';
@@ -44,6 +46,55 @@ function getFolderIcon(iconId: string) {
     npm_global: <Package className="w-4 h-4" />,
   };
   return map[iconId] || <FolderOpen className="w-4 h-4" />;
+}
+
+/** 从 localStorage 读取默认数据迁移目录，仅非 C 盘路径有效 */
+function loadDataDefaultTarget(): string | null {
+  try {
+    const saved = JSON.parse(localStorage.getItem('viap_settings') || '{}');
+    const path = saved.defaultDataTargetPath;
+    if (path && typeof path === 'string' && path.length > 0) {
+      // C 盘路径视为无效，需由用户重新选择
+      if (path.startsWith('C:') || path.startsWith('c:')) return null;
+      return path;
+    }
+  } catch { /* 设置读取失败时忽略 */ }
+  return null;
+}
+
+/**
+ * 解析数据迁移目录目录：优先使用默认设置，否则引导配置或手动选择
+ * 返回选中的目标路径，null 表示用户取消操作
+ */
+async function resolveDataMigrationTarget(
+  defaultPath: string | null,
+  folderName: string,
+  navigateToSettings: ((tab: TabType) => void) | null,
+): Promise<string | null> {
+  if (defaultPath) {
+    const useDefault = await confirm(
+      `使用默认迁移目录：\n${defaultPath}\n\n文件夹 "${folderName}" 将迁移到此目录。`,
+      { title: '迁移目录', kind: 'info', okLabel: '使用默认位置', cancelLabel: '自定义目录' },
+    );
+    if (useDefault) return defaultPath;
+  } else {
+    const goSettings = await confirm(
+      '未设置默认迁移目录。\n\n是否前往设置页进行配置？',
+      { title: '未配置迁移目录', kind: 'info', okLabel: '前往设置', cancelLabel: '自定义目录' },
+    );
+    if (goSettings) {
+      navigateToSettings?.('settings');
+      return null;
+    }
+  }
+
+  // 用户选择自定义目录
+  const targetDir = await open({
+    directory: true,
+    multiple: false,
+    title: `选择迁移目录文件夹 - ${folderName}`,
+  });
+  return targetDir as string | null;
 }
 
 function RiskConfirmModal({
@@ -206,6 +257,9 @@ export default function LargeFolders() {
 
   const { toast, showToast, hideToast } = useToast();
 
+  // 页面导航（跳转至设置页）
+  const setActiveTab = useContext(TabNavigationContext);
+
   const totalReclaimable = useMemo(
     () => folders.filter(f => !f.is_junction && f.exists).reduce((s, f) => s + f.size, 0),
     [folders],
@@ -296,10 +350,12 @@ export default function LargeFolders() {
       }
     } catch { /* non-critical */ }
 
-    const targetDir = await open({ directory: true, title: `选择 "${folder.display_name}" 的迁移目标位置` });
+    // 解析迁移目录（默认设置 / 引导设置 / 手动选择）
+    const defaultTarget = loadDataDefaultTarget();
+    const targetDir = await resolveDataMigrationTarget(defaultTarget, folder.display_name, setActiveTab);
     if (!targetDir) return;
 
-    setConfirmModal({ isOpen: true, folder, targetDir: targetDir as string });
+    setConfirmModal({ isOpen: true, folder, targetDir });
   }
 
   async function confirmMigrate() {

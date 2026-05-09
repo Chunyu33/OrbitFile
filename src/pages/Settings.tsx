@@ -54,12 +54,25 @@ const ABOUT_ITEMS = [
 ];
 
 const SETTINGS_KEY = 'viap_settings';
-const DEFAULT_SETTINGS = { defaultTargetPath: 'D:\\Apps', useRecycleBin: true };
+// 默认目标路径初始为空，由用户手动配置；仅允许选择 C 盘以外的目录
+const DEFAULT_SETTINGS = { defaultAppTargetPath: '', defaultDataTargetPath: '', useRecycleBin: true };
+
+/** 迁移旧版设置：将 defaultTargetPath 升迁为 defaultAppTargetPath */
+function migrateOldSettings(raw: Record<string, unknown>): Record<string, unknown> {
+  if (typeof raw.defaultTargetPath === 'string' && raw.defaultTargetPath) {
+    return { ...raw, defaultAppTargetPath: raw.defaultTargetPath, defaultTargetPath: undefined };
+  }
+  return raw;
+}
 
 function loadSettings() {
   try {
     const saved = localStorage.getItem(SETTINGS_KEY);
-    if (saved) return { ...DEFAULT_SETTINGS, ...JSON.parse(saved) };
+    if (saved) {
+      const raw = JSON.parse(saved);
+      const migrated = migrateOldSettings(raw);
+      return { ...DEFAULT_SETTINGS, ...migrated };
+    }
   } catch { /* ignore */ }
   return DEFAULT_SETTINGS;
 }
@@ -188,9 +201,16 @@ export default function Settings() {
     const ns = { ...settings, [k]: v }; setSettings(ns); saveSettings(ns);
   };
 
-  const handleSelectTargetPath = async () => {
-    const selected = await open({ directory: true, multiple: false, title: '选择默认迁移目标文件夹' });
-    if (selected && typeof selected === 'string') updateSetting('defaultTargetPath', selected);
+  /** 选择默认应用迁移目录（C 盘以外的目录） */
+  const handleSelectAppTargetPath = async () => {
+    const selected = await open({ directory: true, multiple: false, title: '选择默认应用迁移目录文件夹' });
+    if (selected && typeof selected === 'string') updateSetting('defaultAppTargetPath', selected);
+  };
+
+  /** 选择默认数据迁移目录（C 盘以外的目录） */
+  const handleSelectDataTargetPath = async () => {
+    const selected = await open({ directory: true, multiple: false, title: '选择默认数据迁移目录文件夹' });
+    if (selected && typeof selected === 'string') updateSetting('defaultDataTargetPath', selected);
   };
 
   return (
@@ -261,7 +281,8 @@ export default function Settings() {
         <section>
           <SectionHeader label="迁移设置" />
           <div className="rounded border" style={{ borderColor: 'var(--border-color)' }}>
-            <button onClick={handleSelectTargetPath}
+            {/* 默认应用迁移目录 */}
+            <button onClick={handleSelectAppTargetPath}
               className="setting-item w-full text-left"
               style={{ padding: '10px 14px', borderBottom: '1px solid var(--border-color)', cursor: 'pointer' }}>
               <div className="flex items-center gap-3">
@@ -269,14 +290,38 @@ export default function Settings() {
                   <FolderCog className="w-4 h-4" style={{ color: 'var(--color-primary)' }} />
                 </div>
                 <div>
-                  <p className="setting-label">默认迁移目标</p>
-                  <p className="setting-desc">选择应用迁移的默认目标文件夹</p>
+                  <p className="setting-label">默认应用迁移目录</p>
+                  <p className="setting-desc">
+                    {settings.defaultAppTargetPath
+                      ? settings.defaultAppTargetPath.startsWith('C:') || settings.defaultAppTargetPath.startsWith('c:')
+                        ? '⚠ 请选择 C 盘以外的目录'
+                        : settings.defaultAppTargetPath
+                      : '未设置，迁移时将提示选择目录'}
+                  </p>
                 </div>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-[12px]" style={{ color: 'var(--text-tertiary)' }}>{settings.defaultTargetPath}</span>
-                <ChevronRight className="w-3.5 h-3.5" style={{ color: 'var(--text-tertiary)' }} />
+              <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-tertiary)' }} />
+            </button>
+            {/* 默认数据迁移目录 */}
+            <button onClick={handleSelectDataTargetPath}
+              className="setting-item w-full text-left"
+              style={{ padding: '10px 14px', cursor: 'pointer' }}>
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 rounded flex items-center justify-center" style={{ background: 'var(--bg-row-hover)' }}>
+                  <FolderArchive className="w-4 h-4" style={{ color: 'var(--color-warning)' }} />
+                </div>
+                <div>
+                  <p className="setting-label">默认数据迁移目录</p>
+                  <p className="setting-desc">
+                    {settings.defaultDataTargetPath
+                      ? settings.defaultDataTargetPath.startsWith('C:') || settings.defaultDataTargetPath.startsWith('c:')
+                        ? '⚠ 请选择 C 盘以外的目录'
+                        : settings.defaultDataTargetPath
+                      : '未设置，迁移时将提示选择目录'}
+                  </p>
+                </div>
               </div>
+              <ChevronRight className="w-3.5 h-3.5 flex-shrink-0" style={{ color: 'var(--text-tertiary)' }} />
             </button>
             <div className="setting-item" style={{ padding: '10px 14px' }}>
               <div className="flex items-center gap-3">

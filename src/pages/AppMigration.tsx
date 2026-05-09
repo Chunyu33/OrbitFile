@@ -2,7 +2,7 @@
 // 实现完整的迁移流程：目录选择 -> 进程检测 -> 文件复制 -> 创建链接
 // 支持真实进度上报和取消操作
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useState, useTransition, useContext } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { confirm, open } from '@tauri-apps/plugin-dialog';
@@ -11,6 +11,7 @@ import MigrationModal from '../components/MigrationModal';
 import CleanupModal from '../components/CleanupModal';
 import Toast, { useToast } from '../components/Toast';
 import { logger } from '../utils/logger';
+import { TabNavigationContext } from '../App';
 import {
   CleanupResult,
   InstalledApp,
@@ -20,6 +21,7 @@ import {
   MigrationResult,
   MigrationStep,
   ProcessLockResult,
+  TabType,
   UninstallPreview,
   UninstallResult,
 } from '../types';
@@ -27,6 +29,57 @@ import {
 // 模块级大小缓存：Tab 切换后无需重新遍历磁盘获取目录大小
 // 仅当应用列表变更（卸载/迁移/手动刷新）时才重新计算
 let cachedSizeMap: Map<string, number> | null = null;
+
+/** 从 localStorage 读取默认应用迁移目录，仅非 C 盘路径有效 */
+function loadAppDefaultTarget(): string | null {
+  try {
+    const saved = JSON.parse(localStorage.getItem('viap_settings') || '{}');
+    const path = saved.defaultAppTargetPath;
+    if (path && typeof path === 'string' && path.length > 0) {
+      // C 盘路径视为无效，需由用户重新选择
+      if (path.startsWith('C:') || path.startsWith('c:')) return null;
+      return path;
+    }
+  } catch { /* 设置读取失败时忽略 */ }
+  return null;
+}
+
+/**
+ * 解析迁移目录目录：优先使用默认设置，否则引导配置或手动选择
+ * 返回选中的目标路径，null 表示用户取消操作
+ */
+async function resolveMigrationTarget(
+  defaultPath: string | null,
+  appName: string,
+  navigateToSettings: ((tab: TabType) => void) | null,
+): Promise<string | null> {
+  if (defaultPath) {
+    // 有有效默认路径，让用户选择使用默认或自定义
+    const useDefault = await confirm(
+      `使用默认迁移目录：\n${defaultPath}\n\n应用 "${appName}" 将迁移到此目录。`,
+      { title: '迁移目录', kind: 'info', okLabel: '使用默认位置', cancelLabel: '自定义目录' },
+    );
+    if (useDefault) return defaultPath;
+  } else {
+    // 无有效默认路径，引导前往设置或手动选择
+    const goSettings = await confirm(
+      '未设置默认迁移目录。\n\n是否前往设置页进行配置？',
+      { title: '未配置迁移目录', kind: 'info', okLabel: '前往设置', cancelLabel: '自定义目录' },
+    );
+    if (goSettings) {
+      navigateToSettings?.('settings');
+      return null;
+    }
+  }
+
+  // 用户选择自定义目录
+  const targetDir = await open({
+    directory: true,
+    multiple: false,
+    title: `选择迁移目录文件夹 - ${appName}`,
+  });
+  return targetDir as string | null;
+}
 
 export default function AppMigration() {
   const [apps, setApps] = useState<InstalledApp[]>([]);
@@ -68,6 +121,9 @@ export default function AppMigration() {
 
   // Toast 通知
   const { toast, showToast, hideToast } = useToast();
+
+  // 页面导航（跳转至设置页）
+  const setActiveTab = useContext(TabNavigationContext);
 
   // 打开应用所在目录，失败时通过 Toast 反馈
   async function handleOpenFolder(app: InstalledApp) {
@@ -431,16 +487,10 @@ export default function AppMigration() {
 
   // 核心迁移流程
   async function handleMigrate(app: InstalledApp) {
-    // 步骤 1: 打开目录选择器
-    const targetDir = await open({
-      directory: true,
-      multiple: false,
-      title: `选择迁移目标文件夹 - ${app.display_name}`,
-    });
-
-    if (!targetDir) {
-      return;
-    }
+    // 步骤 1: 解析迁移目录（默认设置 / 引导设置 / 手动选择）
+    const defaultTarget = loadAppDefaultTarget();
+    const targetDir = await resolveMigrationTarget(defaultTarget, app.display_name, setActiveTab);
+    if (!targetDir) return;
 
     // 初始化迁移状态
     setMigratingApp(app);
@@ -471,23 +521,16 @@ export default function AppMigration() {
     }
   }
 
-  // 用户确认强制继续（忽略进程锁）
+  // 用户确认强制继续（忽略进程锁），需重新确认目标目录
   async function handleForceContinue() {
     if (!migratingApp) return;
-
-    // 找到 targetDir（从上一个状态无法直接获取，需重新选择）
-    // 实际场景：关闭进程后强制继续，直接进入复制阶段
     setLockedProcesses([]);
 
-    const targetDir = await open({
-      directory: true,
-      multiple: false,
-      title: `选择迁移目标文件夹 - ${migratingApp.display_name}`,
-    });
-
+    const defaultTarget = loadAppDefaultTarget();
+    const targetDir = await resolveMigrationTarget(defaultTarget, migratingApp.display_name, setActiveTab);
     if (!targetDir) return;
 
-    await startCopyPhase(migratingApp, targetDir as string);
+    await startCopyPhase(migratingApp, targetDir);
   }
 
   // 开始文件复制阶段（带事件监听）
@@ -628,11 +671,9 @@ export default function AppMigration() {
   async function handleBatchMigrate() {
     if (selectedKeys.size === 0) return;
 
-    const targetDir = await open({
-      directory: true,
-      multiple: false,
-      title: '选择批量迁移目标文件夹',
-    });
+    // 解析迁移目录（默认设置 / 引导设置 / 手动选择）
+    const defaultTarget = loadAppDefaultTarget();
+    const targetDir = await resolveMigrationTarget(defaultTarget, '批量迁移', setActiveTab);
     if (!targetDir) return;
 
     const selectedApps = apps.filter((a) =>

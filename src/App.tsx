@@ -26,6 +26,9 @@ interface ThemeContextType {
 
 export const ThemeContext = createContext<ThemeContextType | null>(null);
 
+// Tab 导航上下文 - 供子页面切换到设置页
+export const TabNavigationContext = createContext<((tab: TabType) => void) | null>(null);
+
 // 便捷 Hook：在子组件中使用主题
 export function useThemeContext() {
   const context = useContext(ThemeContext);
@@ -91,6 +94,7 @@ function App() {
 
   return (
     <ThemeContext.Provider value={themeState}>
+      <TabNavigationContext.Provider value={setActiveTab}>
       <div className="flex flex-col h-screen overflow-hidden" style={{ background: 'var(--bg-app)' }}>
 
         {/* 统一标题栏：Logo + Tab 导航 + 磁盘状态 + 窗口控制 */}
@@ -143,6 +147,7 @@ function App() {
           </PageTransition>
         </main>
       </div>
+      </TabNavigationContext.Provider>
     </ThemeContext.Provider>
   );
 }
