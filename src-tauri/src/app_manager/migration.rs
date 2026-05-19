@@ -34,19 +34,30 @@ pub struct MigrationProgressEvent {
 }
 
 /// 获取指定磁盘的可用空间
+/// 使用最长前缀匹配，避免多挂载点场景（如 WSL/Subst 虚拟盘）
+/// 回退到错误磁盘
 fn get_available_space(path: &Path) -> u64 {
     let disks = Disks::new_with_refreshed_list();
     let path_str = path.to_string_lossy().to_uppercase();
 
-    for disk in disks.list() {
-        let mount = disk.mount_point().to_string_lossy().to_uppercase();
-        // 挂载点可能带尾随反斜杠（如 "C:\"），去除后与目标路径前缀匹配
-        let mount_clean = mount.trim_end_matches('\\');
-        if path_str.starts_with(mount_clean) {
-            return disk.available_space();
-        }
-    }
-    0
+    disks.list()
+        .iter()
+        .filter_map(|disk| {
+            let mount = disk.mount_point().to_string_lossy().to_uppercase();
+            let mount_clean = mount.trim_end_matches('\\');
+            // 必须匹配完整路径分隔边界，避免 C: 误匹配 CD: 或 C:\Mount\Disk2
+            let is_match = path_str == mount_clean
+                || (path_str.starts_with(mount_clean)
+                    && path_str.as_bytes().get(mount_clean.len()) == Some(&b'\\'));
+            if is_match {
+                Some((mount_clean.len(), disk.available_space()))
+            } else {
+                None
+            }
+        })
+        .max_by_key(|(len, _)| *len) // 选最长（最具体）的挂载点匹配
+        .map(|(_, space)| space)
+        .unwrap_or(0)
 }
 
 /// 发送进度事件到前端
@@ -134,12 +145,14 @@ fn copy_file_with_cancel(
 /// 替代 fs_extra::copy_items，逐个文件复制以便：
 /// 1. 在每个文件 / 每 64KB 之间检查取消标志
 /// 2. 按实际复制量上报进度百分比
+///
+/// 返回 (总文件大小, 因权限拒绝跳过的字节数)
 fn copy_dir_with_progress(
     source: &Path,
     target: &Path,
     cancel_flag: &Arc<AtomicBool>,
     app_handle: &tauri::AppHandle,
-) -> Result<u64, String> {
+) -> Result<(u64, u64), String> {
     // 阶段 1：遍历统计文件列表和总大小
     emit_progress(app_handle, 0.0, "counting", "正在扫描文件...", 0, 0);
 
@@ -162,12 +175,13 @@ fn copy_dir_with_progress(
 
     if total_size == 0 {
         emit_progress(app_handle, 100.0, "copying", "源目录为空，跳过复制", 0, 0);
-        return Ok(0);
+        return Ok((0, 0));
     }
 
     // 阶段 2：逐个复制文件，上报进度
     let total_files = file_list.len() as u64;
     let mut copied_size: u64 = 0;
+    let mut skipped_size: u64 = 0;
     let mut last_report_pct: u64 = 0;
 
     for (idx, (src, dest, size)) in file_list.iter().enumerate() {
@@ -182,7 +196,12 @@ fn copy_dir_with_progress(
         }
 
         // 使用分块复制替代 fs::copy，确保大文件复制期间仍可取消
-        copy_file_with_cancel(src, dest, cancel_flag)?;
+        // 返回值：实际复制的字节数，权限拒绝时返回 0
+        let actually_copied = copy_file_with_cancel(src, dest, cancel_flag)?;
+        if actually_copied == 0 && *size > 0 {
+            // 权限拒绝跳过的文件，记录其大小用于完整性校验容差
+            skipped_size += size;
+        }
 
         copied_size += size;
 
@@ -206,7 +225,7 @@ fn copy_dir_with_progress(
         }
     }
 
-    Ok(total_size)
+    Ok((total_size, skipped_size))
 }
 
 /// 核心迁移命令
@@ -296,22 +315,36 @@ pub fn migrate_app(
         fs::create_dir_all(&target_path)
             .map_err(|e| format!("创建目标目录失败: {}", e))?;
 
-        copy_dir_with_progress(source_path, &target_path, cancel_flag, app_handle)?;
+        let (total_size, skipped_size) = match copy_dir_with_progress(
+            source_path, &target_path, cancel_flag, app_handle,
+        ) {
+            Ok((total, skipped)) => (total, skipped),
+            Err(e) => {
+                // 取消或复制错误：清理已创建的目标目录，避免残留半成品
+                let _ = fs::remove_dir_all(&target_path);
+                return Ok(MigrationResult {
+                    success: false,
+                    message: e,
+                    new_path: None,
+                });
+            }
+        };
 
         // 步骤 3: 完整性校验
+        // 使用实际复制量（去除跳过文件）作为预期基准，避免权限拒绝文件导致误报
         emit_progress(app_handle, 90.0, "verifying", "正在校验文件完整性...", source_size, source_size);
 
         let target_size = utils::get_dir_size_safe(&target_path);
-        let size_diff = (source_size as i64 - target_size as i64).abs();
-        let tolerance = (source_size as f64 * 0.01) as i64;
+        let expected_target = total_size.saturating_sub(skipped_size);
+        let tolerance = skipped_size + 1024 * 1024; // 跳过体积 + 1MB 文件系统元数据浮动
 
-        if size_diff > tolerance {
+        if (target_size as i64 - expected_target as i64).abs() > tolerance as i64 {
             let _ = fs::remove_dir_all(&target_path);
             return Ok(MigrationResult {
                 success: false,
                 message: format!(
-                    "文件完整性校验失败。源大小: {} 字节，目标大小: {} 字节",
-                    source_size, target_size
+                    "文件完整性校验失败。预期: {} 字节，实际: {} 字节，跳过: {} 字节",
+                    expected_target, target_size, skipped_size
                 ),
                 new_path: None,
             });

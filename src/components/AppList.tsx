@@ -39,6 +39,7 @@ interface AppListProps {
   onToggleSelect?: (app: InstalledApp) => void;
   onSelectAll?: () => void;
   onBatchMigrate?: () => void;
+  onStopBatchMigrate?: () => void;
   batchMigrating?: boolean;
   batchProgress?: { current: number; total: number };
   sizesLoading?: boolean;
@@ -255,6 +256,7 @@ export default function AppList({
   apps, loading, onMigrate, onRestore, onUninstall, onOpenFolder,
   uninstallingKey = null, restoringKey = null, migratedPaths = [],
   selectedKeys, onToggleSelect, onSelectAll, onBatchMigrate,
+  onStopBatchMigrate,
   batchMigrating = false, batchProgress,
   sizesLoading = false,
   sizeMap,
@@ -431,19 +433,29 @@ export default function AppList({
                 ? '取消全选'
                 : '全选未迁移'}
             </button>
-            <button
-              onClick={onBatchMigrate}
-              disabled={batchMigrating || !selectedKeys || selectedKeys.size === 0}
-              className="btn btn-primary h-7 text-[11px]"
-              style={{
-                visibility: selectedKeys && selectedKeys.size > 0 ? 'visible' : 'hidden',
-              }}
-            >
-              <ArrowRightLeft className="w-3 h-3" />
-              {batchMigrating && batchProgress
-                ? `迁移中 ${batchProgress.current}/${batchProgress.total}`
-                : `批量迁移 (${selectedKeys?.size ?? 0})`}
-            </button>
+            {batchMigrating ? (
+              <button
+                onClick={onStopBatchMigrate}
+                className="btn h-7 text-[11px]"
+                style={{ background: 'var(--color-danger)', color: 'var(--text-inverse)', borderColor: 'var(--color-danger)' }}
+              >
+                {batchProgress
+                  ? `停止 (${batchProgress.current}/${batchProgress.total})`
+                  : '停止'}
+              </button>
+            ) : (
+              <button
+                onClick={onBatchMigrate}
+                disabled={!selectedKeys || selectedKeys.size === 0}
+                className="btn btn-primary h-7 text-[11px]"
+                style={{
+                  visibility: selectedKeys && selectedKeys.size > 0 ? 'visible' : 'hidden',
+                }}
+              >
+                <ArrowRightLeft className="w-3 h-3" />
+                批量迁移 ({selectedKeys?.size ?? 0})
+              </button>
+            )}
           </div>
         )}
       </div>

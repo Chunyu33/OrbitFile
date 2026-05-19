@@ -2022,7 +2022,6 @@ fn parse_registry_path(path: &str) -> Option<(HKEY, &str)> {
 }
 
 #[cfg(windows)]
-#[cfg(windows)]
 fn is_valid_uninstall_command(command: &str) -> bool {
     let trimmed = command.trim();
     if trimmed.is_empty() {

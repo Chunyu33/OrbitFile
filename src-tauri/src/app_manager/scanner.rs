@@ -1486,35 +1486,46 @@ fn maybe_push_app(
 // ============================================================================
 
 /// 子目录去重：若 path_j 是 path_i 的子目录，移除 path_j
+/// 排序后线性扫描 O(n log n)，替代原双层循环 O(n²)
 #[cfg(windows)]
 fn dedup_subdirectory_apps(apps: &mut Vec<InstalledApp>) {
+    // 按路径字典序排序，子目录必然紧跟在父目录后面
+    apps.sort_unstable_by(|a, b| {
+        normalize_path(&a.install_location).cmp(&normalize_path(&b.install_location))
+    });
+
     let paths: Vec<String> = apps
         .iter()
         .map(|a| normalize_path(&a.install_location))
         .collect();
 
-    let mut remove_indices: Vec<usize> = Vec::new();
-    for i in 0..apps.len() {
-        for j in 0..apps.len() {
-            if i == j {
-                continue;
-            }
+    let mut remove_set: HashSet<usize> = HashSet::new();
+    for i in 0..paths.len() {
+        if remove_set.contains(&i) {
+            continue;
+        }
+        for j in (i + 1)..paths.len() {
             if paths[j].starts_with(&paths[i])
                 && paths[j].as_bytes().get(paths[i].len()) == Some(&b'\\')
             {
-                remove_indices.push(j);
+                remove_set.insert(j);
+            } else if !paths[j].starts_with(&paths[i]) {
+                // 排序后该父目录下不会再有更多子目录
+                break;
             }
         }
     }
 
-    if remove_indices.is_empty() {
+    if remove_set.is_empty() {
         return;
     }
-    remove_indices.sort_unstable();
-    remove_indices.dedup();
-    for idx in remove_indices.into_iter().rev() {
-        apps.remove(idx);
-    }
+
+    let mut idx = 0;
+    apps.retain(|_| {
+        let keep = !remove_set.contains(&idx);
+        idx += 1;
+        keep
+    });
 }
 
 /// 计算目录下所有文件的总大小（KB）

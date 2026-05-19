@@ -2,7 +2,7 @@
 // 实现完整的迁移流程：目录选择 -> 进程检测 -> 文件复制 -> 创建链接
 // 支持真实进度上报和取消操作
 
-import { useEffect, useState, useTransition, useCallback, useContext } from 'react';
+import { useEffect, useState, useTransition, useCallback, useContext, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { confirm, open } from '@tauri-apps/plugin-dialog';
@@ -106,6 +106,8 @@ export default function AppMigration() {
   const [migrationMessage, setMigrationMessage] = useState('');
   const [migrationProgress, setMigrationProgress] = useState(0);
   const [lockedProcesses, setLockedProcesses] = useState<string[]>([]);
+  // 进程锁检测后保存已选目标目录，避免强制继续时重新弹窗选择
+  const [pendingTargetDir, setPendingTargetDir] = useState<string | null>(null);
 
   // 强力卸载状态
   const [uninstallingKey, setUninstallingKey] = useState<string | null>(null);
@@ -115,6 +117,8 @@ export default function AppMigration() {
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [batchMigrating, setBatchMigrating] = useState(false);
   const [batchProgress, setBatchProgress] = useState({ current: 0, total: 0 });
+  // 批量迁移取消标志，用 ref 避免异步循环中闭包捕获过期 state
+  const batchCancelledRef = useRef(false);
   const [cleanupModalOpen, setCleanupModalOpen] = useState(false);
   const [cleanupTargetAppName, setCleanupTargetAppName] = useState('');
   const [cleanupTargetPublisher, setCleanupTargetPublisher] = useState<string | null>(null);
@@ -528,9 +532,9 @@ export default function AppMigration() {
       });
 
       if (lockResult.is_locked) {
-        // 阻塞：显示进程占用列表，等待用户处理（关闭进程后强制继续）
+        // 保存已选目标目录，供强制继续时直接复用，不再弹窗
+        setPendingTargetDir(targetDir as string);
         setLockedProcesses(lockResult.processes);
-        // 不自动继续，用户需手动点击"强制继续"或关闭弹窗
         return;
       }
 
@@ -542,15 +546,12 @@ export default function AppMigration() {
     }
   }
 
-  // 用户确认强制继续（忽略进程锁），需重新确认目标目录
+  // 用户确认强制继续（忽略进程锁），复用已保存的目标目录
   async function handleForceContinue() {
-    if (!migratingApp) return;
+    if (!migratingApp || !pendingTargetDir) return;
     setLockedProcesses([]);
-
-    const defaultTarget = loadAppDefaultTarget();
-    const targetDir = await resolveMigrationTarget(defaultTarget, migratingApp.display_name, setActiveTab, showTargetPicker);
-    if (!targetDir) return;
-
+    const targetDir = pendingTargetDir;
+    setPendingTargetDir(null);
     await startCopyPhase(migratingApp, targetDir);
   }
 
@@ -676,6 +677,12 @@ export default function AppMigration() {
     });
   }
 
+  // 停止批量迁移：设置取消标志并通知后端停止当前任务
+  function handleStopBatchMigrate() {
+    batchCancelledRef.current = true;
+    invoke('cancel_migration').catch(() => {});
+  }
+
   function handleSelectAll() {
     const selectable = apps.filter((a) => !migratedPaths.some(
       (p) => p.toLowerCase() === a.install_location.toLowerCase()
@@ -709,6 +716,7 @@ export default function AppMigration() {
     if (!confirmed) return;
 
     setBatchMigrating(true);
+    batchCancelledRef.current = false;
     setBatchProgress({ current: 0, total: selectedApps.length });
     setSelectedKeys(new Set());
 
@@ -716,6 +724,12 @@ export default function AppMigration() {
     let failCount = 0;
 
     for (let i = 0; i < selectedApps.length; i++) {
+      // 用户手动停止批量迁移
+      if (batchCancelledRef.current) {
+        showToast(`批量迁移已停止，已完成 ${successCount} 个`, 'info');
+        break;
+      }
+
       const app = selectedApps[i];
       setBatchProgress({ current: i + 1, total: selectedApps.length });
 
@@ -751,10 +765,12 @@ export default function AppMigration() {
     setBatchMigrating(false);
     setBatchProgress({ current: 0, total: 0 });
 
-    if (failCount === 0) {
-      showToast(`批量迁移完成：${successCount} 个全部成功`, 'success');
-    } else {
-      showToast(`批量迁移完成：${successCount} 成功, ${failCount} 失败`, 'info');
+    if (!batchCancelledRef.current) {
+      if (failCount === 0) {
+        showToast(`批量迁移完成：${successCount} 个全部成功`, 'success');
+      } else {
+        showToast(`批量迁移完成：${successCount} 成功, ${failCount} 失败`, 'info');
+      }
     }
     await handleRefresh();
   }
@@ -781,6 +797,7 @@ export default function AppMigration() {
             onToggleSelect={handleToggleSelect}
             onSelectAll={handleSelectAll}
             onBatchMigrate={handleBatchMigrate}
+            onStopBatchMigrate={handleStopBatchMigrate}
             batchMigrating={batchMigrating}
             batchProgress={batchProgress}
             sizesLoading={sizesLoading}

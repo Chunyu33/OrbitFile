@@ -71,15 +71,26 @@ pub fn get_or_scan() -> Result<Vec<InstalledApp>, String> {
     apps.extend(failsafe);
 
     // 图标复用：路径未变的条目保留原有 Base64，减少 CPU 开销
+    // 先提取 (路径, 图标) → (Base64, URL) 快照，尽快释放读锁
+    // 避免在持有锁期间进行 O(n²) 字符串克隆操作
     {
-        let cache = APP_CACHE.read().unwrap();
+        let icon_cache: std::collections::HashMap<
+            (String, String),
+            (String, String),
+        > = {
+            let cache = APP_CACHE.read().unwrap();
+            cache.apps.iter().map(|a| {
+                ((a.install_location.clone(), a.display_icon.clone()),
+                 (a.icon_base64.clone(), a.icon_url.clone()))
+            }).collect()
+        }; // 读锁在此释放
+
         for app in &mut apps {
-            if let Some(old) = cache.apps.iter().find(|a| {
-                a.install_location == app.install_location
-                    && a.display_icon == app.display_icon
-            }) {
-                app.icon_base64 = old.icon_base64.clone();
-                app.icon_url = old.icon_url.clone();
+            if let Some((b64, url)) = icon_cache.get(
+                &(app.install_location.clone(), app.display_icon.clone())
+            ) {
+                app.icon_base64 = b64.clone();
+                app.icon_url = url.clone();
             }
         }
     }

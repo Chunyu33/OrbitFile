@@ -246,7 +246,19 @@ fn default_special_path(app_name: &str) -> Option<PathBuf> {
         "chrome_cache" => dirs::data_local_dir().map(|d| d.join(r"Google\Chrome\User Data\Default\Cache")),
         "edge_cache" => dirs::data_local_dir().map(|d| d.join(r"Microsoft\Edge\User Data\Default\Cache")),
         "vscode_extensions" => dirs::home_dir().map(|d| d.join(".vscode").join("extensions")),
-        "npm_global" => dirs::data_dir().map(|d| d.join("npm").join("node_modules")),
+        "npm_global" => {
+            // 优先读取 npm config get prefix，支持用户自定义全局安装路径
+            // 失败或返回空时回退到默认 %APPDATA%\npm\node_modules
+            let from_npm = std::process::Command::new("npm")
+                .args(["config", "get", "prefix"])
+                .output()
+                .ok()
+                .and_then(|o| String::from_utf8(o.stdout).ok())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty() && s != "undefined")
+                .map(|prefix| PathBuf::from(prefix).join("node_modules"));
+            from_npm.or_else(|| dirs::data_dir().map(|d| d.join("npm").join("node_modules")))
+        },
         _ => dirs::home_dir(),
     }
 }
