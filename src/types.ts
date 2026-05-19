@@ -161,16 +161,6 @@ export interface LargeFolderSizeEvent {
 }
 
 /**
- * 大文件夹恢复完成事件
- * 恢复在后台线程执行，完成后通过 "large-folder-restore-complete" 事件推送
- */
-export interface LargeFolderRestoreCompleteEvent {
-  success: boolean;
-  message: string;
-  new_path: string | null;
-}
-
-/**
  * 数据目录配置
  * 对应 Rust 后端的 DataDirConfig 结构体
  */

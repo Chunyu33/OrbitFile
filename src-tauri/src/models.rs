@@ -112,14 +112,6 @@ pub struct LargeFolderSizeEvent {
     pub size: u64,
 }
 
-/// 大文件夹恢复完成事件
-#[derive(Debug, Clone, Serialize)]
-pub struct LargeFolderRestoreCompleteEvent {
-    pub success: bool,
-    pub message: String,
-    pub new_path: Option<String>,
-}
-
 // ============================================================================
 // 数据目录管理
 // ============================================================================

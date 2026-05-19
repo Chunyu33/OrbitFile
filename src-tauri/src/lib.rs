@@ -167,6 +167,7 @@ pub fn run() {
             storage::data_dir::set_data_dir,
             // 文件夹管理
             folder_manager::get_large_folders,
+            folder_manager::start_folder_size_scan,
             folder_manager::migrate_large_folder,
             folder_manager::add_custom_folder,
             folder_manager::remove_custom_folder,

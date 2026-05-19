@@ -117,8 +117,12 @@ pub fn save_app_data_templates(templates: Vec<AppDataTemplate>) -> Result<(), St
 ///
 /// ## 应用数据文件夹
 /// 从 `app_data_templates.json` 加载模板，内置类型通过 detector 模块动态检测路径
+///
+/// 注意：返回时 size 均为 0，前端需随后调用 start_folder_size_scan 触发异步大小计算。
+/// 将扫描与计算分离是为了消除竞态：前端注册 large-folder-size 监听器后才启动后台线程，
+/// 避免线程在监听器就绪前 emit 事件导致事件丢失。
 #[tauri::command]
-pub fn get_large_folders(app_handle: AppHandle) -> Result<Vec<LargeFolder>, String> {
+pub fn get_large_folders() -> Result<Vec<LargeFolder>, String> {
     let mut folders: Vec<LargeFolder> = Vec::new();
 
     // ========== 系统文件夹 ==========
@@ -152,11 +156,6 @@ pub fn get_large_folders(app_handle: AppHandle) -> Result<Vec<LargeFolder>, Stri
     // ========== 应用数据文件夹 ==========
     let app_data_templates = load_app_data_templates();
 
-    let builtin_ids: Vec<String> = app_data_templates.iter()
-        .filter(|t| t.path.is_none())
-        .map(|t| t.id.clone())
-        .collect();
-
     let all_statuses = crate::app_manager::detector::get_special_folders_status()?;
 
     for template in &app_data_templates {
@@ -176,7 +175,8 @@ pub fn get_large_folders(app_handle: AppHandle) -> Result<Vec<LargeFolder>, Stri
                 icon_id: template.icon_id.clone(),
                 exists,
             });
-        } else if builtin_ids.contains(&template.id) {
+        } else {
+            // 内置模板：无自定义路径，从 detector 状态读取
             let status = match all_statuses.iter().find(|s| s.name == template.id) {
                 Some(s) => s, None => continue,
             };
@@ -223,19 +223,40 @@ pub fn get_large_folders(app_handle: AppHandle) -> Result<Vec<LargeFolder>, Stri
         type_order(&a.folder_type).cmp(&type_order(&b.folder_type))
     });
 
-    // 后台异步计算文件夹大小
-    compute_folder_sizes_async(app_handle.clone(), folders.clone());
-
     Ok(folders)
+}
+
+/// 启动文件夹大小异步扫描（Tauri 命令）
+///
+/// 前端在注册好 `large-folder-size` 事件监听器后调用此命令，
+/// 避免后台线程在监听器就绪前 emit 事件导致事件丢失。
+/// 接收前端回传的文件夹列表（来自 get_large_folders 的返回值），
+/// 仅读取路径和 Junction 信息用于大小计算。
+#[tauri::command]
+pub fn start_folder_size_scan(
+    folders: Vec<LargeFolder>,
+    app_handle: AppHandle,
+) -> Result<(), String> {
+    compute_folder_sizes_async(app_handle, folders);
+    Ok(())
 }
 
 /// 后台异步计算各文件夹大小并通过事件推送
 /// 始终推送事件（即使大小为 0），避免前端因缺少事件而永久显示 "--"
+/// Junction 文件夹计算其目标目录的实际大小
 fn compute_folder_sizes_async(app_handle: AppHandle, folders: Vec<LargeFolder>) {
     std::thread::spawn(move || {
         for folder in &folders {
-            if !folder.exists || folder.is_junction { continue; }
-            let path = PathBuf::from(&folder.path);
+            if !folder.exists { continue; }
+            // Junction 文件夹计算目标目录大小，非 Junction 计算自身大小
+            let path = if folder.is_junction {
+                match &folder.junction_target {
+                    Some(target) => PathBuf::from(target),
+                    None => continue,
+                }
+            } else {
+                PathBuf::from(&folder.path)
+            };
             let size = utils::get_folder_size(&path);
             let _ = app_handle.emit("large-folder-size", LargeFolderSizeEvent {
                 folder_id: folder.id.clone(), size,
@@ -297,10 +318,16 @@ pub fn add_custom_folder(path: String) -> Result<(), String> {
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| path.clone());
 
-    // 基于路径生成唯一 ID（简单哈希）
-    let hash: u64 = path.as_bytes().iter().enumerate()
-        .fold(0u64, |acc, (i, &b)| acc.wrapping_add((b as u64).wrapping_mul(i as u64 + 1)));
-    let id = format!("custom_{:x}", hash);
+    // 基于路径 + 时间戳生成唯一 ID，使用标准库 DefaultHasher 避免碰撞
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos()
+        .hash(&mut hasher);
+    let id = format!("custom_{:x}", hasher.finish());
 
     let storage_path = utils::custom_folders_path(&ensure_data_dir());
     let mut custom = data_dir::load_custom_folders(&storage_path);
@@ -326,11 +353,12 @@ pub fn remove_custom_folder(id: String) -> Result<(), String> {
 }
 
 /// 恢复大文件夹（从 Junction 恢复到原位置）
+/// async + spawn_blocking：直接返回结果，弃用 fire-and-forget 事件模式
+/// 避免线程 panic 导致前端 restoringFolderId 永不清除
 #[tauri::command]
-pub fn restore_large_folder(
+pub async fn restore_large_folder(
     junction_path: String,
-    app_handle: AppHandle,
-) -> Result<(), String> {
+) -> Result<MigrationResult, String> {
     #[cfg(windows)]
     {
         let junction = PathBuf::from(&junction_path);
@@ -348,22 +376,12 @@ pub fn restore_large_folder(
             return Err(format!("目标路径不存在: {}", target_path.to_string_lossy()));
         }
 
-        let handle = app_handle.clone();
         let target_path_str = target_path.to_string_lossy().to_string();
-        std::thread::spawn(move || {
-            let result = restore_large_folder_inner(&junction, &target_path_str);
-            let event = match &result {
-                Ok(r) => LargeFolderRestoreCompleteEvent {
-                    success: r.success, message: r.message.clone(), new_path: r.new_path.clone(),
-                },
-                Err(e) => LargeFolderRestoreCompleteEvent {
-                    success: false, message: e.clone(), new_path: None,
-                },
-            };
-            let _ = handle.emit("large-folder-restore-complete", event);
-        });
-
-        Ok(())
+        tauri::async_runtime::spawn_blocking(move || {
+            restore_large_folder_inner(&junction, &target_path_str)
+        })
+        .await
+        .map_err(|e| format!("恢复线程异常: {}", e))?
     }
 
     #[cfg(not(windows))]
@@ -393,10 +411,26 @@ fn restore_large_folder_inner(
     options.overwrite = false;
     options.copy_inside = false;
 
-    move_dir(&target_path, original_parent, &options).map_err(|e| {
-        #[cfg(windows)]
-        let _ = symlink_dir(&target_path, junction_path);
-        format!("移动文件夹失败: {}。已恢复符号链接。", e)
+    move_dir(&target_path, original_parent, &options).map_err(|move_err| {
+        // 尝试在原位置重建 Junction，恢复用户对数据的访问路径
+        let rollback_label = {
+            #[cfg(windows)]
+            {
+                match symlink_dir(&target_path, junction_path) {
+                    Ok(_) => format!(
+                        "已自动恢复符号链接，数据仍在: {}",
+                        target_path.display()
+                    ),
+                    Err(rb_err) => format!(
+                        "且无法恢复符号链接 ({})。数据仍安全保存在: {}，请手动移回: {}",
+                        rb_err, target_path.display(), junction_path.display()
+                    ),
+                }
+            }
+            #[cfg(not(windows))]
+            { String::new() }
+        };
+        format!("移动文件夹失败: {}。{}", move_err, rollback_label)
     })?;
 
     // 步骤 4: 更新迁移记录状态
@@ -407,7 +441,10 @@ fn restore_large_folder_inner(
 
     Ok(MigrationResult {
         success: true,
-        message: format!("恢复成功！文件夹已恢复到 {}", junction_str),
+        message: format!(
+            "恢复成功！文件夹已从 {} 移回 {}",
+            target_str, junction_str
+        ),
         new_path: Some(junction_str),
     })
 }

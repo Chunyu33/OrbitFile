@@ -17,7 +17,7 @@ import MigrationModal from '../components/MigrationModal';
 import TargetPickerDialog from '../components/TargetPickerDialog';
 import {
   LargeFolder, ProcessLockResult, LargeFolderSizeEvent,
-  LargeFolderRestoreCompleteEvent, MigrationProgressEvent,
+  MigrationProgressEvent,
   MigrationResult, MigrationStep, TabType,
 } from '../types';
 import { TabNavigationContext } from '../App';
@@ -64,10 +64,6 @@ function loadDataDefaultTarget(): string | null {
   return null;
 }
 
-/**
- * 解析数据迁移目录目录：优先使用默认设置，否则引导配置或手动选择
- * 返回选中的目标路径，null 表示用户取消操作
- */
 /**
  * 解析数据迁移目标目录：优先使用默认设置，否则引导配置或手动选择
  * 返回选中的目标路径，null 表示用户取消操作
@@ -333,6 +329,8 @@ export default function LargeFolders() {
       setLoading(true);
       const result = await invoke<LargeFolder[]>('get_large_folders');
       setFolders(result);
+      // 在前端监听器就绪后启动大小扫描，避免竞态导致事件丢失
+      await invoke('start_folder_size_scan', { folders: result });
     } catch (error) {
       console.error('获取大文件夹列表失败:', error);
       showToast('获取文件夹列表失败', 'error');
@@ -374,22 +372,6 @@ export default function LargeFolders() {
     return () => { if (unlisten) unlisten(); };
   }, []);
 
-  // restore complete events
-  useEffect(() => {
-    let unlisten: UnlistenFn | null = null;
-    (async () => {
-      try {
-        unlisten = await listen<LargeFolderRestoreCompleteEvent>('large-folder-restore-complete', (event) => {
-          const { success, message } = event.payload;
-          setRestoringFolderId(null);
-          if (success) { showToast(message, 'success'); fetchFolders(); }
-          else { showToast(message, 'error'); }
-        });
-      } catch { /* ignore */ }
-    })();
-    return () => { if (unlisten) unlisten(); };
-  }, [showToast, fetchFolders]);
-
   useEffect(() => { fetchFolders(); }, [fetchFolders]);
 
   async function handleRefresh() { setRefreshing(true); await fetchFolders(); setRefreshing(false); }
@@ -402,8 +384,9 @@ export default function LargeFolders() {
   // 判断文件夹是否已迁移（Junction 状态）
   const isFolderMigrated = useCallback((f: LargeFolder) => f.is_junction, []);
 
-  // 选择/取消选择文件夹
+  // 选择/取消选择文件夹：不可用文件夹（!exists）不允许选中
   function handleToggleSelect(folder: LargeFolder) {
+    if (!folder.exists) return;
     setSelectedKeys((prev) => {
       const next = new Set(prev);
       if (next.has(folder.id)) next.delete(folder.id);
@@ -413,9 +396,10 @@ export default function LargeFolders() {
   }
 
   function handleSelectAll() {
-    const selectable = folders.filter((f) => !isFolderMigrated(f));
+    // 只选可迁移的：未迁移 且 路径存在
+    const selectable = folders.filter((f) => !isFolderMigrated(f) && f.exists);
     setSelectedKeys((prev) => {
-      if (prev.size === selectable.length) return new Set();
+      if (prev.size === selectable.length && selectable.length > 0) return new Set();
       return new Set(selectable.map((f) => f.id));
     });
   }
@@ -606,9 +590,15 @@ export default function LargeFolders() {
       } catch { /* non-critical */ }
     }
     setRestoringFolderId(folder.id);
-    showToast(`正在恢复 ${folder.display_name}...`, 'info');
     try {
-      await invoke('restore_large_folder', { junctionPath: folder.path });
+      const result = await invoke<MigrationResult>('restore_large_folder', { junctionPath: folder.path });
+      setRestoringFolderId(null);
+      if (result.success) {
+        showToast(result.message, 'success');
+        await fetchFolders();
+      } else {
+        showToast(result.message, 'error');
+      }
     } catch (error) {
       setRestoringFolderId(null);
       showToast(`恢复失败: ${error}`, 'error');
