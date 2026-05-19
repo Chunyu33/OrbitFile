@@ -8,6 +8,7 @@ import { FolderSync, FolderArchive, History, Settings as SettingsIcon } from 'lu
 import TitleBar from './components/TitleBar';
 import DiskUsageBar from './components/DiskUsageBar';
 import PageTransition from './components/PageTransition';
+import UpdateNotification from './components/UpdateNotification';
 import AppMigration from './pages/AppMigration';
 import LargeFolders from './pages/LargeFolders';
 import MigrationHistory from './pages/MigrationHistory';
@@ -139,6 +140,9 @@ function App() {
             />
           )}
         />
+
+        {/* 标题栏下方：更新通知条 */}
+        <UpdateNotification />
 
         {/* 页面内容区域 */}
         <main className="flex-1 overflow-hidden" style={{ background: 'var(--bg-content)' }}>

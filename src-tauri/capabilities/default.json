@@ -13,6 +13,8 @@
     "opener:default",
     "dialog:default",
     "opener:allow-reveal-item-in-dir",
-    "opener:allow-open-path"
+    "opener:allow-open-path",
+    "updater:default",
+    "process:allow-restart"
   ]
 }

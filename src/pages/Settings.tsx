@@ -5,10 +5,11 @@ import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { open, confirm } from '@tauri-apps/plugin-dialog';
 import { getVersion } from '@tauri-apps/api/app';
+import { useUpdater } from '../hooks/useUpdater';
 import AppIconSvg from '../assets/icon.svg';
 import {
   FolderCog, ChevronRight, User, Mail,
-  FolderArchive, Trash2,
+  FolderArchive, Trash2, RefreshCw,
   AppWindow, Loader2, Sun, Moon, Monitor, Database,
   Github, Video, ExternalLink, BookOpen, Heart,
 } from 'lucide-react';
@@ -136,6 +137,7 @@ export default function Settings() {
 
   const { toast, showToast, hideToast } = useToast();
   const themeState = useThemeContext();
+  const { status: updateStatus, updateInfo, downloadProgress, checkForUpdate, downloadAndInstall } = useUpdater();
 
   useEffect(() => {
     setSettings(loadSettings());
@@ -456,6 +458,48 @@ export default function Settings() {
           </div>
         </section>
 
+        {/* 更新 */}
+        <section>
+          <SectionHeader label="更新" />
+          <div className="rounded border" style={{ borderColor: 'var(--border-color)', padding: '10px 14px' }}>
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded flex items-center justify-center" style={{ background: 'var(--bg-row-hover)' }}>
+                <RefreshCw className={`w-4 h-4 ${updateStatus === 'checking' || updateStatus === 'downloading' ? 'animate-spin' : ''}`}
+                  style={{ color: updateStatus === 'available' ? 'var(--color-primary)' : 'var(--text-secondary)' }} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="setting-label">
+                  {updateStatus === 'idle' && '检查更新'}
+                  {updateStatus === 'checking' && '检测中...'}
+                  {updateStatus === 'up-to-date' && '已是最新版本'}
+                  {updateStatus === 'available' && updateInfo && `发现新版本 v${updateInfo.version}`}
+                  {updateStatus === 'downloading' && `正在下载 ${downloadProgress}%`}
+                  {updateStatus === 'installing' && '安装中...'}
+                  {updateStatus === 'error' && '更新失败'}
+                </p>
+                <p className="setting-desc">
+                  当前版本：v{appVersion}
+                  {updateStatus === 'available' && updateInfo?.notes && ` — ${updateInfo.notes}`}
+                </p>
+              </div>
+              <div className="flex items-center gap-1.5 flex-shrink-0">
+                {updateStatus === 'idle' || updateStatus === 'error' || updateStatus === 'up-to-date' ? (
+                  <button onClick={() => checkForUpdate()}
+                    className="btn h-7 text-[11px]">
+                    <RefreshCw className="w-3 h-3" />
+                    {updateStatus === 'up-to-date' ? '重新检测' : '检测更新'}
+                  </button>
+                ) : updateStatus === 'available' ? (
+                  <button onClick={() => downloadAndInstall()} className="btn btn-primary h-7 text-[11px]">
+                    <RefreshCw className="w-3 h-3" />
+                    立即更新
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </section>
+
         {/* help */}
         <section>
           <SectionHeader label="帮助" />
@@ -556,7 +600,7 @@ export default function Settings() {
 
         {/* copyright */}
         <div className="text-center py-3 text-[11px]" style={{ color: 'var(--text-tertiary)' }}>
-          &copy; {currentYear} {APP_INFO.name} · Evan Lau
+          &copy; {currentYear} {APP_INFO.name} · All Right reserved.
         </div>
       </div>
 
