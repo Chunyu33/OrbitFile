@@ -21,6 +21,7 @@ dist-ssr
 CLAUDE.*
 AGENTS.*
 /docs
+/~/*
 *.suo
 *.ntvs*
 *.njsproj
