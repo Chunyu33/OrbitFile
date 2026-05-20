@@ -601,10 +601,16 @@ export default function AppMigration() {
       });
 
       // 目标路径已有残留目录 → 询问用户是否覆盖
-      if (!result.success && result.message.startsWith('TARGET_EXISTS:')) {
-        const existingPath = result.message.replace('TARGET_EXISTS:', '');
+      if (!result.success && (result.message.startsWith('TARGET_EXISTS_RETRY:') || result.message.startsWith('TARGET_EXISTS:'))) {
+        const isRetry = result.message.startsWith('TARGET_EXISTS_RETRY:');
+        const existingPath = isRetry
+          ? result.message.replace('TARGET_EXISTS_RETRY:', '')
+          : result.message.replace('TARGET_EXISTS:', '');
+        const promptMsg = isRetry
+          ? `上次迁移未完全完成，目标位置存在残留目录：\n${existingPath}\n\n覆盖将清理残留并重新迁移。`
+          : `目标路径已存在残留目录：\n${existingPath}\n\n可能是上次恢复或迁移失败留下的。\n覆盖将删除该目录后重新迁移，是否继续？`;
         const overwrite = await confirm(
-          `目标路径已存在残留目录：\n${existingPath}\n\n可能是上次恢复或迁移失败留下的。\n覆盖将删除该目录后重新迁移，是否继续？`,
+          promptMsg,
           { title: '目标目录已存在', kind: 'warning', okLabel: '覆盖并迁移', cancelLabel: '取消' }
         );
         if (!overwrite) {
@@ -663,9 +669,10 @@ export default function AppMigration() {
 
   // 取消当前迁移
   async function handleCancelMigration() {
+    // 立即给出视觉反馈，避免用户觉得按钮无效
+    setMigrationMessage('正在取消迁移，请稍候...');
     try {
       await invoke('cancel_migration');
-      showToast('正在取消迁移...', 'info');
     } catch (error) {
       logger.error('取消迁移失败:', error);
     }
@@ -787,11 +794,17 @@ export default function AppMigration() {
         });
 
         // 目标路径已有残留目录 → 弹出确认框，用户确认后以 force_overwrite 重试
-        if (!result.success && result.message.startsWith('TARGET_EXISTS:')) {
+        if (!result.success && (result.message.startsWith('TARGET_EXISTS_RETRY:') || result.message.startsWith('TARGET_EXISTS:'))) {
           if (batchCancelledRef.current) { failCount++; continue; }
-          const existingPath = result.message.replace('TARGET_EXISTS:', '');
+          const isRetry = result.message.startsWith('TARGET_EXISTS_RETRY:');
+          const existingPath = isRetry
+            ? result.message.replace('TARGET_EXISTS_RETRY:', '')
+            : result.message.replace('TARGET_EXISTS:', '');
+          const promptMsg = isRetry
+            ? `${app.display_name} 上次迁移未完全完成，目标位置存在残留目录：\n${existingPath}\n\n覆盖将清理残留并重新迁移。`
+            : `${app.display_name} 的目标路径已存在残留目录：\n${existingPath}\n\n覆盖将删除该目录后重新迁移，是否继续？`;
           const overwrite = await confirm(
-            `${app.display_name} 的目标路径已存在残留目录：\n${existingPath}\n\n覆盖将删除该目录后重新迁移，是否继续？`,
+            promptMsg,
             { title: '目标目录已存在', kind: 'warning', okLabel: '覆盖并迁移', cancelLabel: '跳过' }
           );
           if (overwrite) {

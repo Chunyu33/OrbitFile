@@ -220,6 +220,14 @@ impl AppScanner {
             if install_location.is_empty() {
                 continue;
             }
+            // UWP/MSIX 包：InstallLocation 在 \WindowsApps\ 下，系统管控不可迁移
+            let loc_lower = install_location.to_lowercase();
+            if loc_lower.contains("\\windowsapps\\")
+                || loc_lower.contains("\\program files\\windowsapps")
+                || loc_lower.contains("\\program files (x86)\\windowsapps")
+            {
+                continue;
+            }
             // exists() 会跟随重解析点查询目标属性；目录联接（迁移后）若目标存在则通过
             // 若返回 false 再通过 symlink_metadata 确认是否为联接本身存在但目标不可达的情况
             let install_path = Path::new(&install_location);
@@ -827,6 +835,13 @@ fn is_system_component(display_name: &str) -> bool {
         || lower.contains("service pack")
         || lower.starts_with("microsoft .net")
         || lower.starts_with("microsoft visual c++")
+        // UWP/MSIX 运行时框架包，InstallLocation 在 \WindowsApps\ 下，用户不可管理
+        || lower.contains("deploymentagent")
+        || lower.contains("darkmodecheck")
+        || lower.starts_with("microsoft.windowsappruntime")
+        || lower.starts_with("microsoft.ui.xaml")
+        || lower.starts_with("microsoft.vclibs")
+        || lower.starts_with("microsoft.net.native")
 }
 
 /// 计算字符串的 Shannon 熵（用于检测随机文件名）
@@ -890,6 +905,12 @@ fn is_blacklisted_path(path: &Path) -> bool {
         "\\program files (x86)\\common files",
         "\\program files\\dotnet",
         "\\program files (x86)\\dotnet",
+        // UWP/MSIX 包目录，系统管控，不可迁移
+        "\\program files\\windowsapps",
+        "\\program files (x86)\\windowsapps",
+        "\\windowsapps\\",
+        // Windows 运行时框架（WinUI、VCLibs 等）
+        "\\program files\\modifiablewindowsapps",
     ];
     if EXTENDED_BLACKLIST.iter().any(|p| lower.contains(p)) {
         return true;
@@ -911,6 +932,8 @@ fn is_system_path(path: &str) -> bool {
     lower.contains("\\windows\\system32")
         || lower.contains("\\windows\\syswow64")
         || lower.contains("\\windows\\systemapps")
+        || lower.contains("\\program files\\windowsapps")
+        || lower.contains("\\program files (x86)\\windowsapps")
 }
 
 // ============================================================================

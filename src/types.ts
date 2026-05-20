@@ -225,6 +225,7 @@ export type MigrationStep =
  * 通过 Tauri Event "migration-progress" 推送
  */
 export interface MigrationProgressEvent {
+  task_id: string;
   percent: number;
   step: string;
   message: string;

@@ -463,6 +463,11 @@ pub fn restore_app(history_id: String) -> Result<MigrationResult, String> {
             format!("移动文件失败: {}。已恢复链接。", e)
         })?;
 
+        // 防御性清理：move_dir 跨卷时可能残留空目录或碎片文件
+        if target_path.exists() {
+            let _ = fs::remove_dir_all(&target_path);
+        }
+
         // 步骤 6: 更新记录
         storage.records[record_index].status = "restored".to_string();
         save_history(&storage)?;

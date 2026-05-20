@@ -21,6 +21,8 @@ use std::os::windows::fs::symlink_dir;
 /// 迁移进度事件（发送到前端）
 #[derive(Clone, Serialize)]
 pub struct MigrationProgressEvent {
+    /// 任务标识（源路径），前端用于区分批量迁移中各任务的进度
+    pub task_id: String,
     /// 当前进度百分比 0.0 ~ 100.0
     pub percent: f64,
     /// 当前步骤: counting | copying | verifying | linking | done
@@ -63,6 +65,7 @@ fn get_available_space(path: &Path) -> u64 {
 /// 发送进度事件到前端
 fn emit_progress(
     app_handle: &tauri::AppHandle,
+    task_id: &str,
     percent: f64,
     step: &str,
     message: &str,
@@ -70,6 +73,7 @@ fn emit_progress(
     total_size: u64,
 ) {
     let _ = app_handle.emit("migration-progress", MigrationProgressEvent {
+        task_id: task_id.to_string(),
         percent,
         step: step.to_string(),
         message: message.to_string(),
@@ -150,11 +154,12 @@ fn copy_file_with_cancel(
 fn copy_dir_with_progress(
     source: &Path,
     target: &Path,
+    task_id: &str,
     cancel_flag: &Arc<AtomicBool>,
     app_handle: &tauri::AppHandle,
 ) -> Result<(u64, u64), String> {
     // 阶段 1：遍历统计文件列表和总大小
-    emit_progress(app_handle, 0.0, "counting", "正在扫描文件...", 0, 0);
+    emit_progress(app_handle, task_id, 0.0, "counting", "正在扫描文件...", 0, 0);
 
     let mut file_list: Vec<(PathBuf, PathBuf, u64)> = Vec::new();
     let mut total_size: u64 = 0;
@@ -174,7 +179,7 @@ fn copy_dir_with_progress(
     }
 
     if total_size == 0 {
-        emit_progress(app_handle, 100.0, "copying", "源目录为空，跳过复制", 0, 0);
+        emit_progress(app_handle, task_id, 100.0, "copying", "源目录为空，跳过复制", 0, 0);
         return Ok((0, 0));
     }
 
@@ -216,6 +221,7 @@ fn copy_dir_with_progress(
             last_report_pct = current_pct;
             emit_progress(
                 app_handle,
+                task_id,
                 current_pct as f64,
                 "copying",
                 &format!("正在复制文件 ({}/{})", idx + 1, total_files),
@@ -284,9 +290,21 @@ pub fn migrate_app(
 
         if target_path.exists() {
             if !force_overwrite {
+                // 判断是否为失败迁移残留：source 是普通目录且 target 也存在
+                // 区别于 JUNCTION_LOOP 场景（source 仍是 Junction 指向 target）
+                let looks_like_failed_migration = source_path.is_dir()
+                    && !crate::utils::is_junction(source_path)
+                    && target_path.is_dir();
+
+                let msg = if looks_like_failed_migration {
+                    format!("TARGET_EXISTS_RETRY:{}", target_path_str)
+                } else {
+                    format!("TARGET_EXISTS:{}", target_path_str)
+                };
+
                 return Ok(MigrationResult {
                     success: false,
-                    message: format!("TARGET_EXISTS:{}", target_path_str),
+                    message: msg,
                     new_path: None,
                 });
             }
@@ -320,8 +338,45 @@ pub fn migrate_app(
                 ))?;
         }
 
+        // 步骤 0.5: 检测源路径是否被进程占用（占用时 symlink_dir 必然失败）
+        // 前端 AppMigration.tsx 已有独立的 check_process_locks 调用，
+        // 此处作为后端兜底保护，同时覆盖文件夹迁移等未在前端检测的入口
+        {
+            let mut sys = sysinfo::System::new_all();
+            sys.refresh_all();
+            let source_lower = source.to_lowercase();
+            let running: Vec<String> = sys.processes().values()
+                .filter_map(|p| {
+                    p.exe().and_then(|exe| {
+                        if exe.to_string_lossy().to_lowercase().starts_with(&source_lower) {
+                            Some(p.name().to_string_lossy().to_string())
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect();
+
+            if !running.is_empty() {
+                return Ok(MigrationResult {
+                    success: false,
+                    message: format!(
+                        "检测到以下程序正在使用该目录：\n{}\n\n\
+                         请关闭上述程序后重试。",
+                        running.join("、")
+                    ),
+                    new_path: None,
+                });
+            }
+        }
+
+        // 步骤 0.5.1：及时响应取消（sysinfo 刷新可能较慢）
+        if cancel_flag.load(Ordering::Relaxed) {
+            return Err("用户取消了迁移".to_string());
+        }
+
         // 步骤 1: 空间检查
-        emit_progress(app_handle, 0.0, "counting", "正在计算源文件夹大小...", 0, 0);
+        emit_progress(app_handle, &source, 0.0, "counting", "正在计算源文件夹大小...", 0, 0);
 
         let source_size = utils::get_dir_size_safe(source_path);
 
@@ -341,13 +396,18 @@ pub fn migrate_app(
             });
         }
 
+        // 步骤 1.1：及时响应取消（get_dir_size_safe 对大目录可能耗时较长）
+        if cancel_flag.load(Ordering::Relaxed) {
+            return Err("用户取消了迁移".to_string());
+        }
+
         // 步骤 2: 复制文件（带进度上报和取消支持）
         // 先创建目标目录的父目录结构
         fs::create_dir_all(&target_path)
             .map_err(|e| format!("创建目标目录失败: {}", e))?;
 
         let (total_size, skipped_size) = match copy_dir_with_progress(
-            source_path, &target_path, cancel_flag, app_handle,
+            source_path, &target_path, &source, cancel_flag, app_handle,
         ) {
             Ok((total, skipped)) => (total, skipped),
             Err(e) => {
@@ -363,11 +423,14 @@ pub fn migrate_app(
 
         // 步骤 3: 完整性校验
         // 使用实际复制量（去除跳过文件）作为预期基准，避免权限拒绝文件导致误报
-        emit_progress(app_handle, 90.0, "verifying", "正在校验文件完整性...", source_size, source_size);
+        emit_progress(app_handle, &source, 90.0, "verifying", "正在校验文件完整性...", source_size, source_size);
 
         let target_size = utils::get_dir_size_safe(&target_path);
         let expected_target = total_size.saturating_sub(skipped_size);
-        let tolerance = skipped_size + 1024 * 1024; // 跳过体积 + 1MB 文件系统元数据浮动
+        // 容差 = 跳过体积 + 1MB 元数据浮动，但不超过源大小的 5%
+        // 避免大面积权限拒绝（如 DRM 保护文件）时容差过宽导致漏检
+        let max_tolerance = (total_size as f64 * 0.05) as u64 + 1024 * 1024;
+        let tolerance = skipped_size.min(max_tolerance) + 1024 * 1024;
 
         if (target_size as i64 - expected_target as i64).abs() > tolerance as i64 {
             let _ = fs::remove_dir_all(&target_path);
@@ -382,7 +445,7 @@ pub fn migrate_app(
         }
 
         // 步骤 4: 备份原目录
-        emit_progress(app_handle, 93.0, "linking", "正在创建目录链接...", source_size, source_size);
+        emit_progress(app_handle, &source, 93.0, "linking", "正在创建目录链接...", source_size, source_size);
 
         let backup_path = source_path.with_file_name(format!("{}_viap_backup", folder_name));
         let backup_path_str = backup_path.to_string_lossy().to_string();
@@ -426,9 +489,10 @@ pub fn migrate_app(
         match symlink_dir(&target_path, source_path) {
             Ok(_) => {
                 // 步骤 6: 清理备份
-                emit_progress(app_handle, 97.0, "linking", "正在清理临时文件...", source_size, source_size);
+                emit_progress(app_handle, &source, 97.0, "linking", "正在清理临时文件...", source_size, source_size);
 
-                if let Err(e) = fs::remove_dir_all(&backup_path) {
+                let backup_cleanup_err = fs::remove_dir_all(&backup_path).err();
+                if let Some(ref e) = backup_cleanup_err {
                     log_warn!("migration", "无法删除备份目录 {}: {}", backup_path_str, e);
                 }
 
@@ -450,32 +514,66 @@ pub fn migrate_app(
                     );
                 }
 
-                emit_progress(app_handle, 100.0, "done", "迁移完成", source_size, source_size);
+                emit_progress(app_handle, &source, 100.0, "done", "迁移完成", source_size, source_size);
+
+                // 备份清理失败时在成功消息中附加提示，避免用户以为已释放空间
+                let mut success_msg = format!("迁移成功！应用已从 {} 迁移到 {}", source, target_path_str);
+                if backup_cleanup_err.is_some() {
+                    success_msg.push_str(&format!(
+                        "\n注意：临时备份目录未能自动删除，请手动清理以释放空间：\n{}",
+                        backup_path_str
+                    ));
+                }
 
                 Ok(MigrationResult {
                     success: true,
-                    message: format!("迁移成功！应用已从 {} 迁移到 {}", source, target_path_str),
+                    message: success_msg,
                     new_path: Some(target_path_str),
                 })
             }
             Err(e) => {
-                // 回滚：恢复原目录并清理目标
-                if let Err(restore_err) = fs::rename(&backup_path, source_path) {
+                // 回滚语义：还原到迁移前状态，不留中间状态
+                let source_restored = fs::rename(&backup_path, source_path).is_ok();
+
+                if !source_restored {
+                    // 原目录恢复失败：target 是唯一数据副本，绝对不能删
                     return Ok(MigrationResult {
                         success: false,
                         message: format!(
-                            "严重错误: 创建链接失败 ({})，且无法恢复原目录 ({})。\n备份位置: {}\n目标位置: {}",
-                            e, restore_err, backup_path_str, target_path_str
+                            "严重错误：创建链接失败（{}），且无法自动恢复原目录。\n\n\
+                             您的数据完整保存在：{}\n\
+                             请手动将该目录移回：{}\n\
+                             备份目录位于：{}",
+                            e, target_path_str, source, backup_path_str
                         ),
                         new_path: None,
                     });
                 }
 
-                let _ = fs::remove_dir_all(&target_path);
+                // 原目录已恢复，安全删除 target 副本，还原到迁移前状态
+                if let Err(cleanup_err) = fs::remove_dir_all(&target_path) {
+                    // 删除失败：两边都有数据，提示用户手动清理
+                    log_warn!("migration", "回滚时无法删除目标目录 {}: {}", target_path_str, cleanup_err);
+                    return Ok(MigrationResult {
+                        success: false,
+                        message: format!(
+                            "创建目录链接失败：{}\n\
+                             原目录已自动恢复，数据完好无损。\n\n\
+                             但目标位置的副本未能自动删除，请手动清理以释放空间：\n{}\n\n\
+                             可能原因：应用正在后台运行，请完全关闭后重试。",
+                            e, target_path_str
+                        ),
+                        new_path: None,
+                    });
+                }
+
+                // 回滚完成：原目录恢复，target 副本已删，状态与迁移前完全一致
                 Ok(MigrationResult {
                     success: false,
                     message: format!(
-                        "创建目录链接失败: {}。\n可能原因: 需要管理员权限或启用开发者模式。\n已自动恢复原目录。",
+                        "创建目录链接失败：{}\n\
+                         原目录已自动恢复，数据完好无损，未产生任何残留。\n\n\
+                         可能原因：应用正在后台运行，请完全关闭后重试。",
                         e
                     ),
                     new_path: None,
