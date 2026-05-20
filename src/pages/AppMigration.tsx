@@ -592,12 +592,48 @@ export default function AppMigration() {
     }
 
     // 执行迁移（Rust 后端会在复制过程中推送进度事件）
+    // 支持 TARGET_EXISTS 重试：检测到残留目录时弹出确认框，用户确认后以 force_overwrite 重试
     try {
-      const result = await invoke<MigrationResult>('migrate_app', {
+      let result = await invoke<MigrationResult>('migrate_app', {
         appName: app.display_name,
         source: app.install_location,
         targetParent: targetDir,
       });
+
+      // 目标路径已有残留目录 → 询问用户是否覆盖
+      if (!result.success && result.message.startsWith('TARGET_EXISTS:')) {
+        const existingPath = result.message.replace('TARGET_EXISTS:', '');
+        const overwrite = await confirm(
+          `目标路径已存在残留目录：\n${existingPath}\n\n可能是上次恢复或迁移失败留下的。\n覆盖将删除该目录后重新迁移，是否继续？`,
+          { title: '目标目录已存在', kind: 'warning', okLabel: '覆盖并迁移', cancelLabel: '取消' }
+        );
+        if (!overwrite) {
+          if (unlisten) unlisten();
+          setMigrationStep('error');
+          setMigrationMessage('用户取消了迁移（目标路径已存在残留目录）');
+          return;
+        }
+        // 用户确认覆盖，使用 force_overwrite 重试
+        result = await invoke<MigrationResult>('migrate_app', {
+          appName: app.display_name,
+          source: app.install_location,
+          targetParent: targetDir,
+          forceOverwrite: true,
+        });
+      }
+
+      // 源路径是 Junction 且指向目标：恢复失败残留状态，覆盖迁移会丢失数据
+      if (!result.success && result.message.startsWith('JUNCTION_LOOP:')) {
+        const targetPath = result.message.replace('JUNCTION_LOOP:', '');
+        if (unlisten) unlisten();
+        setMigrationStep('error');
+        setMigrationMessage(
+          `检测到原路径仍是指向目标盘的链接，无法覆盖迁移。\n\n` +
+          `请先前往「迁移记录」页面恢复该应用，再重新迁移。\n\n` +
+          `目标位置：${targetPath}`
+        );
+        return;
+      }
 
       // 取消事件监听
       if (unlisten) unlisten();
@@ -744,11 +780,40 @@ export default function AppMigration() {
           continue;
         }
 
-        const result = await invoke<MigrationResult>('migrate_app', {
+        let result = await invoke<MigrationResult>('migrate_app', {
           appName: app.display_name,
           source: app.install_location,
           targetParent: targetDir,
         });
+
+        // 目标路径已有残留目录 → 弹出确认框，用户确认后以 force_overwrite 重试
+        if (!result.success && result.message.startsWith('TARGET_EXISTS:')) {
+          if (batchCancelledRef.current) { failCount++; continue; }
+          const existingPath = result.message.replace('TARGET_EXISTS:', '');
+          const overwrite = await confirm(
+            `${app.display_name} 的目标路径已存在残留目录：\n${existingPath}\n\n覆盖将删除该目录后重新迁移，是否继续？`,
+            { title: '目标目录已存在', kind: 'warning', okLabel: '覆盖并迁移', cancelLabel: '跳过' }
+          );
+          if (overwrite) {
+            result = await invoke<MigrationResult>('migrate_app', {
+              appName: app.display_name,
+              source: app.install_location,
+              targetParent: targetDir,
+              forceOverwrite: true,
+            });
+          } else {
+            showToast(`${app.display_name}: 已跳过（目标路径已存在残留目录）`, 'info');
+            failCount++;
+            continue;
+          }
+        }
+
+        // 源路径是 Junction 且指向目标：恢复失败残留，覆盖迁移会丢失数据
+        if (!result.success && result.message.startsWith('JUNCTION_LOOP:')) {
+          showToast(`${app.display_name}: 原路径仍是链接，请先在迁移记录中恢复后重试`, 'error');
+          failCount++;
+          continue;
+        }
 
         if (result.success) {
           successCount++;

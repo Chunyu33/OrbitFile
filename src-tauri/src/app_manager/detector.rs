@@ -114,11 +114,12 @@ pub fn migrate_special_folder(
     target_dir: String,
     cancel_flag: &Arc<AtomicBool>,
     app_handle: &tauri::AppHandle,
+    force_overwrite: bool,
 ) -> Result<MigrationResult, String> {
     #[cfg(windows)]
     {
         ensure_app_not_running(&app_name)?;
-        crate::app_manager::migration::migrate_app(app_name, source_path, target_dir, cancel_flag, app_handle, crate::models::MigrationRecordType::LargeFolder)
+        crate::app_manager::migration::migrate_app(app_name, source_path, target_dir, cancel_flag, app_handle, crate::models::MigrationRecordType::LargeFolder, force_overwrite)
     }
 
     #[cfg(not(windows))]

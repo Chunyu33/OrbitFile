@@ -236,6 +236,8 @@ pub struct GhostLinkEntry {
     pub original_path: String,
     pub target_path: String,
     pub size: u64,
+    /// 损坏类型：target_missing | junction_broken | original_missing
+    pub damage_type: String,
 }
 
 /// 幽灵链接预览结果

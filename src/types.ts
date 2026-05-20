@@ -85,6 +85,8 @@ export interface GhostLinkEntry {
   original_path: string;
   target_path: string;
   size: number;
+  /** 损坏类型：target_missing | junction_broken | original_missing */
+  damage_type: 'target_missing' | 'junction_broken' | 'original_missing';
 }
 
 /** 幽灵链接预览结果 */

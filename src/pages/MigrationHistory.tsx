@@ -281,7 +281,12 @@ export default function MigrationHistory() {
         showToast('已成功恢复', 'success');
         await loadHistory();
       } else {
-        showToast(result.message, 'error');
+        // 并发恢复场景：message 包含"另一个恢复任务"时给出友好提示
+        if (result.message.includes('另一个恢复任务')) {
+          showToast('请等待当前恢复任务完成后再操作', 'info');
+        } else {
+          showToast(result.message, 'error');
+        }
       }
     } catch (error) {
       showToast(`恢复失败: ${error}`, 'error');

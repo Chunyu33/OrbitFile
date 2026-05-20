@@ -179,7 +179,12 @@ pub fn check_link_status(record_id: String) -> Result<LinkStatusResult, String> 
 // 幽灵链接管理
 // ============================================================================
 
-/// 预览幽灵链接（只读扫描，不执行删除）
+/// 预览无效记录（只读扫描，不执行删除）
+///
+/// 统一检测三类损坏：
+/// - target_missing：新盘目标路径已不存在，数据丢失
+/// - junction_broken：原路径存在但不是 Junction，链接已断裂
+/// - original_missing：原路径 Junction 已被手动删除，记录孤立
 #[tauri::command]
 pub fn preview_ghost_links() -> Result<GhostLinkPreview, String> {
     let storage = load_history();
@@ -188,14 +193,30 @@ pub fn preview_ghost_links() -> Result<GhostLinkPreview, String> {
 
     for record in &storage.records {
         if record.status != "active" { continue; }
+
+        let original_path = Path::new(&record.original_path);
         let target_path = Path::new(&record.target_path);
-        if !target_path.exists() {
+
+        let target_missing = !target_path.exists();
+        let junction_broken = original_path.exists() && !utils::is_junction(original_path);
+        let original_missing = !original_path.exists() && !utils::is_junction(original_path);
+
+        if target_missing || junction_broken || original_missing {
+            let damage_type = if target_missing {
+                "target_missing"
+            } else if junction_broken {
+                "junction_broken"
+            } else {
+                "original_missing"
+            };
+
             entries.push(GhostLinkEntry {
                 record_id: record.id.clone(),
                 app_name: record.app_name.clone(),
                 original_path: record.original_path.clone(),
                 target_path: record.target_path.clone(),
                 size: record.size,
+                damage_type: damage_type.to_string(),
             });
             total_size += record.size;
         }
@@ -204,7 +225,11 @@ pub fn preview_ghost_links() -> Result<GhostLinkPreview, String> {
     Ok(GhostLinkPreview { entries, total_size })
 }
 
-/// 清理幽灵链接
+/// 清理无效记录
+///
+/// 覆盖三类损坏的清理：
+/// - Junction 正常删除，非 Junction 普通目录拒绝删除（保护用户数据）并报错
+/// - 原路径已消失的直接更新状态即可
 #[tauri::command]
 pub fn clean_ghost_links() -> Result<CleanupResult, String> {
     let mut storage = load_history();
@@ -218,26 +243,45 @@ pub fn clean_ghost_links() -> Result<CleanupResult, String> {
         let original_path = Path::new(&record.original_path);
         let target_path = Path::new(&record.target_path);
 
-        if !target_path.exists() {
-            // 尝试删除 Junction
-            if original_path.exists() && utils::is_junction(original_path) {
+        let target_missing = !target_path.exists();
+        let junction_broken = original_path.exists() && !utils::is_junction(original_path);
+        let original_missing = !original_path.exists() && !utils::is_junction(original_path);
+
+        if !target_missing && !junction_broken && !original_missing {
+            continue; // 健康记录，跳过
+        }
+
+        // 清理原路径（如果还存在）
+        if original_path.exists() {
+            if utils::is_junction(original_path) {
+                // Junction → 正常删除
                 if let Err(e) = fs::remove_dir(original_path) {
-                    errors.push(format!("无法删除 Junction {}: {}", record.original_path, e));
+                    errors.push(format!("无法删除链接 {}: {}", record.original_path, e));
                     continue;
                 }
+            } else {
+                // 非 Junction 的普通目录 → 拒绝删除以保护数据，但仍清理记录
+                // 场景：restore_app 已把数据移回但 Junction 实际是普通目录、或用户手动移回数据
+                errors.push(format!(
+                    "{} 的原路径 {} 是普通目录（非 Junction），已保留该目录并清理无效记录，请手动确认。\n\
+                     提示：若需重新迁移到 {}，应用已支持覆盖残留目录",
+                    record.app_name, record.original_path, record.target_path
+                ));
+                // 继续执行下方 status 更新，不 continue 阻塞
             }
+        }
+        // original_path 不存在 → 无需清理，直接更新状态
 
-            record.status = "ghost_cleaned".to_string();
-            cleaned_count += 1;
-            cleaned_size += record.size;
-            // 同步移除兜底元数据
-            if record.record_type == MigrationRecordType::App {
-                crate::storage::migrated_app_metadata::remove_migrated_app(&record.original_path);
-            }
+        record.status = "ghost_cleaned".to_string();
+        cleaned_count += 1;
+        cleaned_size += record.size;
+
+        if record.record_type == MigrationRecordType::App {
+            crate::storage::migrated_app_metadata::remove_migrated_app(&record.original_path);
         }
     }
 
-    if cleaned_count > 0 {
+    if cleaned_count > 0 || !errors.is_empty() {
         save_history(&storage)?;
     }
 
@@ -333,16 +377,25 @@ pub fn import_history(src_path: String) -> Result<u32, String> {
 /// 恢复已迁移应用到原始位置
 ///
 /// # 恢复流程
+/// 0. 获取全局恢复锁（防止并发）
 /// 1. 查找迁移记录
-/// 2. 验证状态（目标存在、原路径为 Junction）
+/// 2. 验证状态（目标存在、原路径为 Junction 或不存在）
 /// 3. 空间检查（必须在删除 Junction 前执行）
-/// 4. 删除 Junction
+/// 4. 删除 Junction（确认是 Reparse Point 才删除）
 /// 5. 移动文件回原位置（失败时回滚重建 Junction）
 /// 6. 更新记录状态
 #[tauri::command]
 pub fn restore_app(history_id: String) -> Result<MigrationResult, String> {
     #[cfg(windows)]
     {
+        // 步骤 0: 尝试获取恢复锁，防止并发恢复任务互相干扰
+        let _guard = match utils::try_acquire_restore_lock() {
+            Ok(guard) => guard,
+            Err(msg) => return Ok(MigrationResult {
+                success: false, message: msg, new_path: None,
+            }),
+        };
+
         // 步骤 1: 查找记录
         let mut storage = load_history();
 
@@ -368,14 +421,20 @@ pub fn restore_app(history_id: String) -> Result<MigrationResult, String> {
             });
         }
 
-        let is_symlink = original_path.symlink_metadata()
-            .map(|m| m.file_type().is_symlink())
-            .unwrap_or(false);
+        // 用 utils::is_junction 替代 symlink_metadata().is_symlink()
+        // Windows Junction（目录联接）在 Rust 标准库中 is_symlink() 返回 false，
+        // 而 symlink_dir 在未开启开发者模式时实际创建的是 Junction，导致无法恢复
+        let is_junction = utils::is_junction(original_path);
 
-        if !is_symlink && original_path.exists() {
+        // 原路径存在但不是 Reparse Point → 真正的普通目录，拒绝恢复保护用户数据
+        if original_path.exists() && !is_junction {
             return Ok(MigrationResult {
                 success: false,
-                message: format!("原路径 {} 不是符号链接，无法恢复", record.original_path),
+                message: format!(
+                    "原路径 {} 是一个普通目录（不是迁移创建的链接），拒绝恢复以保护数据安全。\n\
+                     如确认数据已迁移到 {}，请手动处理。",
+                    record.original_path, record.target_path
+                ),
                 new_path: None,
             });
         }
@@ -386,21 +445,22 @@ pub fn restore_app(history_id: String) -> Result<MigrationResult, String> {
             .ok_or("无法获取原路径的父目录")?;
         utils::check_disk_space_for_restore(original_parent, file_size)?;
 
-        // 步骤 4: 删除 Junction
-        if original_path.exists() {
+        // 步骤 4: 删除 Junction（只在确认是 Reparse Point 时才删除）
+        if is_junction {
             fs::remove_dir(&original_path).map_err(|e| {
-                format!("删除符号链接失败: {}。请确保没有程序正在使用该目录。", e)
+                format!("删除链接失败: {}。请确保没有程序正在使用该目录。", e)
             })?;
         }
+        // 若原路径既不是 Junction 也不存在 → 直接进入步骤 5，move_dir 会将目标移回
 
-        // 步骤 5: 移动文件回原位置（失败时回滚）
+        // 步骤 5: 移动文件回原位置（失败时回滚重建 Junction）
         let mut options = CopyOptions::new();
         options.overwrite = false;
         options.copy_inside = false;
 
         move_dir(&target_path, original_parent, &options).map_err(|e| {
             let _ = symlink_dir(&target_path, &original_path);
-            format!("移动文件失败: {}。已恢复符号链接。", e)
+            format!("移动文件失败: {}。已恢复链接。", e)
         })?;
 
         // 步骤 6: 更新记录

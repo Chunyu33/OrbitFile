@@ -241,6 +241,7 @@ pub fn migrate_app(
     cancel_flag: &Arc<AtomicBool>,
     app_handle: &tauri::AppHandle,
     record_type: MigrationRecordType,
+    force_overwrite: bool,
 ) -> Result<MigrationResult, String> {
     #[cfg(windows)]
     {
@@ -282,11 +283,41 @@ pub fn migrate_app(
         let target_path_str = target_path.to_string_lossy().to_string();
 
         if target_path.exists() {
-            return Ok(MigrationResult {
-                success: false,
-                message: format!("目标路径已存在: {}", target_path_str),
-                new_path: None,
-            });
+            if !force_overwrite {
+                return Ok(MigrationResult {
+                    success: false,
+                    message: format!("TARGET_EXISTS:{}", target_path_str),
+                    new_path: None,
+                });
+            }
+
+            // force_overwrite 安全检查：源路径是否为指向目标路径的 Junction
+            // 场景：迁移成功但恢复失败，源路径仍是 Junction 指向目标盘数据
+            // 此时删除目标 = 删除唯一数据副本，源 Junction 变成悬空链接
+            let source_is_junction_to_target = crate::utils::is_junction(source_path) && {
+                crate::utils::get_junction_target(source_path)
+                    .map(|t| {
+                        t.to_lowercase().trim_end_matches('\\').to_string()
+                        == target_path_str.to_lowercase().trim_end_matches('\\').to_string()
+                    })
+                    .unwrap_or(false)
+            };
+
+            if source_is_junction_to_target {
+                return Ok(MigrationResult {
+                    success: false,
+                    message: format!("JUNCTION_LOOP:{}", target_path_str),
+                    new_path: None,
+                });
+            }
+
+            // 安全：源路径非 Junction 或指向不同目标，可安全删除目标残留
+            log_warn!("migration", "force_overwrite: 删除残留目标目录 {}", target_path_str);
+            fs::remove_dir_all(&target_path)
+                .map_err(|e| format!(
+                    "无法删除残留目录: {}。请手动删除后重试。原因: {}",
+                    target_path_str, e
+                ))?;
         }
 
         // 步骤 1: 空间检查

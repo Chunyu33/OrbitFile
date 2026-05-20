@@ -298,7 +298,7 @@ pub async fn migrate_large_folder(
     let result = tauri::async_runtime::spawn_blocking(move || {
         crate::app_manager::migration::migrate_app(
             folder_name, source_path, target_dir, &cancel_flag, &handle,
-            MigrationRecordType::LargeFolder,
+            MigrationRecordType::LargeFolder, false,
         )
     }).await.map_err(|e| format!("迁移线程异常: {}", e))?;
 
@@ -376,8 +376,18 @@ pub async fn restore_large_folder(
             return Err(format!("目标路径不存在: {}", target_path.to_string_lossy()));
         }
 
+        // 获取全局恢复锁，防止与 restore_app 或其他恢复任务并发
+        let _guard = match utils::try_acquire_restore_lock() {
+            Ok(guard) => guard,
+            Err(msg) => return Ok(MigrationResult {
+                success: false, message: msg, new_path: None,
+            }),
+        };
+
         let target_path_str = target_path.to_string_lossy().to_string();
         tauri::async_runtime::spawn_blocking(move || {
+            // 将 _guard 移入 blocking 线程，hold 锁直到恢复完成
+            let _lock = _guard;
             restore_large_folder_inner(&junction, &target_path_str)
         })
         .await

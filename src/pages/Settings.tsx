@@ -379,7 +379,7 @@ export default function Settings() {
               <div className="flex-1 min-w-0">
                 <p className="setting-label mb-1">清理无效记录</p>
                 <p className="setting-desc" style={{ marginBottom: '20px' }}>
-                  扫描并清理目标磁盘已移除的幽灵链接。先预览，再确认清理。
+                  扫描并清理目标丢失、链接断裂或已消失的无效记录。先预览，再确认清理。
                 </p>
 
                 <button onClick={handlePreviewGhostLinks} disabled={ghostScanning} className="btn h-7 text-[12px]">
@@ -394,9 +394,30 @@ export default function Settings() {
                         发现 {ghostPreview.entries.length} 条幽灵链接（{formatSize(ghostPreview.total_size)}）
                       </p>
                       {ghostPreview.entries.map(e => (
-                        <div key={e.record_id} className="py-0.5">
-                          <span style={{ color: 'var(--text-primary)' }}>{e.app_name}</span>
-                          <span style={{ color: 'var(--text-tertiary)' }}> — {e.original_path}</span>
+                        <div key={e.record_id} className="py-1 border-b last:border-0" style={{ borderColor: 'var(--border-color)' }}>
+                          <div className="flex items-center gap-2">
+                            <span style={{ color: 'var(--text-primary)' }}>{e.app_name}</span>
+                            <span className="badge text-[10px]" style={{
+                              background: e.damage_type === 'target_missing'
+                                ? 'var(--color-danger-light)'
+                                : 'var(--color-warning-light)',
+                              color: e.damage_type === 'target_missing'
+                                ? 'var(--color-danger)'
+                                : 'var(--color-warning)',
+                            }}>
+                              {e.damage_type === 'target_missing' && '目标丢失'}
+                              {e.damage_type === 'junction_broken' && '链接断裂'}
+                              {e.damage_type === 'original_missing' && '源路径消失'}
+                            </span>
+                          </div>
+                          <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-tertiary)' }}>
+                            {e.damage_type === 'target_missing'
+                              ? `目标: ${e.target_path}`
+                              : e.damage_type === 'junction_broken'
+                              ? `原路径不再是链接: ${e.original_path}`
+                              : `原链接已消失: ${e.original_path}`
+                            }
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -420,7 +441,7 @@ export default function Settings() {
 `
                       : '未发现无效记录'}
                     {cleanResult.errors.length > 0 && (
-                      <div style={{ color: 'var(--color-danger)', marginTop: '4px' }}>
+                      <div style={{ color: 'var(--color-danger)', marginTop: '4px', whiteSpace: 'pre-line' }}>
                         {cleanResult.errors.map((err, i) => <div key={i}>{err}</div>)}
                       </div>
                     )}

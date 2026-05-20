@@ -7,6 +7,27 @@ use std::fs;
 #[cfg(windows)]
 use sysinfo::Disks;
 use walkdir::WalkDir;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+/// 全局恢复锁：确保同一时刻只有一个恢复任务在运行
+/// 前端 restoringId 仅阻止 UI 重复点击，无法阻止快速双击或来自不同入口的并发 invoke
+pub static RESTORE_LOCK: AtomicBool = AtomicBool::new(false);
+
+/// RAII 锁守卫：在函数任意返回路径（包括 ? 提前返回）自动释放全局恢复锁
+pub struct RestoreLockGuard;
+impl Drop for RestoreLockGuard {
+    fn drop(&mut self) {
+        RESTORE_LOCK.store(false, Ordering::SeqCst);
+    }
+}
+
+/// 尝试获取恢复锁，返回 RAII 守卫；若已被占用则返回错误信息
+pub fn try_acquire_restore_lock() -> Result<RestoreLockGuard, String> {
+    if RESTORE_LOCK.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst).is_err() {
+        return Err("另一个恢复任务正在进行中，请等待完成后再试".to_string());
+    }
+    Ok(RestoreLockGuard)
+}
 
 /// 检测路径是否为 Junction（目录联接）
 ///
