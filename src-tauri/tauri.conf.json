@@ -53,7 +53,7 @@
       "endpoints": [
         "https://github.com/Chunyu33/viap/releases/latest/download/latest.json"
       ],
-      "dialog": false,
+      "dialog": true,
       "windows": {
         "installMode": "passive"
       }

@@ -35,10 +35,10 @@ jobs:
         with:
           targets: x86_64-pc-windows-msvc
 
-      - name: Rust cache
-        uses: swatinem/rust-cache@v2
-        with:
-          workspaces: './src-tauri -> target'
+      # - name: Rust cache
+      #   uses: swatinem/rust-cache@v2
+      #   with:
+      #     workspaces: './src-tauri -> target'
 
       - name: Install frontend dependencies
         run: npm install
