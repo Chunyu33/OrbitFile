@@ -249,6 +249,9 @@ impl AppScanner {
             // DisplayIcon 校验：若指向的文件不存在则清空，由 extract_icons_parallel 兜底
             let effective_icon = validate_display_icon(&display_icon);
 
+            // 规范化安装路径：去除尾部分隔符，防止图标提取和路径比对异常
+            let install_location = install_location.trim_end_matches(['\\', '/']).to_string();
+
             let registry_path = format!("{}\\{}\\{}", hive_name, base_path, subkey_name);
             let icon_path = if effective_icon.is_empty() {
                 String::new() // 清空无效路径，后续从安装目录搜索 exe 提取图标
@@ -520,7 +523,7 @@ fn normalize_path(path: &str) -> String {
 fn resolve_install_location_from_registry(subkey: &RegKey) -> String {
     // 1) InstallLocation
     let raw: String = subkey.get_value("InstallLocation").unwrap_or_default();
-    let loc = raw.trim().trim_matches('"').to_string();
+    let loc = raw.trim().trim_matches('"').trim_end_matches(['\\', '/']).to_string();
     if !loc.is_empty() {
         return loc;
     }
@@ -528,13 +531,13 @@ fn resolve_install_location_from_registry(subkey: &RegKey) -> String {
     // 2) DisplayIcon 推导
     let display_icon: String = subkey.get_value("DisplayIcon").unwrap_or_default();
     if let Some(dir) = derive_install_location_from_icon(&display_icon) {
-        return dir;
+        return dir.trim_end_matches(['\\', '/']).to_string();
     }
 
     // 3) UninstallString 推导
     let uninstall_string: String = subkey.get_value("UninstallString").unwrap_or_default();
     if let Some(dir) = derive_install_location_from_icon(&uninstall_string) {
-        return dir;
+        return dir.trim_end_matches(['\\', '/']).to_string();
     }
 
     String::new()
@@ -635,7 +638,7 @@ fn extract_dir_from_command_string(raw: &str) -> Option<String> {
             return None;
         }
         if dir.exists() {
-            return Some(dir.to_string_lossy().to_string());
+            return Some(dir.to_string_lossy().trim_end_matches(['\\', '/']).to_string());
         }
     }
     None
@@ -684,7 +687,7 @@ fn derive_install_location_from_icon(icon_or_uninstall: &str) -> Option<String> 
     {
         return None;
     }
-    Some(dir.to_string_lossy().to_string())
+    Some(dir.to_string_lossy().trim_end_matches(['\\', '/']).to_string())
 }
 
 /// 判断文件名是否像安装包/卸载器/更新器
