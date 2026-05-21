@@ -46,7 +46,7 @@ const APP_INFO = {
   name: 'Viap',
   description: 'Windows 应用管理与存储重定向工具',
   author: 'Evan Lau',
-  email: 'liucygm33@gmail.com',
+  email: '1378813463@qq.com',
 };
 
 const ABOUT_ITEMS = [
